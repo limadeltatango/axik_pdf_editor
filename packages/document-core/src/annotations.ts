@@ -124,7 +124,10 @@ export interface StandardCalloutPayload {
   /** Serialization to PDF /CL is ordered (arrow target, optional elbow, text attachment). */
   calloutLine: readonly number[];
   text: string;
+  /** Full annotation bounds including the arrow and leader. */
   rect: readonly [number, number, number, number];
+  /** Inner free-text box, for a future /RD and /AP implementation. */
+  textBoxRect: readonly [number, number, number, number];
 }
 
 /**
@@ -134,15 +137,23 @@ export interface StandardCalloutPayload {
  */
 export function calloutToStandardPayload(callout: CalloutAnnotation): StandardCalloutPayload {
   validateAnnotation(callout);
+  const textBoxRect = [
+    callout.box.x, callout.box.y,
+    callout.box.x + callout.box.width,
+    callout.box.y + callout.box.height
+  ] as const;
+  const allX = [textBoxRect[0], textBoxRect[2], ...callout.leader.map((point) => point.x)];
+  const allY = [textBoxRect[1], textBoxRect[3], ...callout.leader.map((point) => point.y)];
+  const padding = Math.max(4, callout.style.lineWidth * 3);
   return {
     subtype: "FreeText",
     intent: "FreeTextCallout",
     calloutLine: callout.leader.flatMap((point) => [point.x, point.y]),
     text: callout.text,
     rect: [
-      callout.box.x, callout.box.y,
-      callout.box.x + callout.box.width,
-      callout.box.y + callout.box.height
-    ]
+      Math.min(...allX) - padding, Math.min(...allY) - padding,
+      Math.max(...allX) + padding, Math.max(...allY) + padding
+    ],
+    textBoxRect
   };
 }
