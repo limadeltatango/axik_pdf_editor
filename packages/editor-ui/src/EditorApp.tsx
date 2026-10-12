@@ -25,6 +25,7 @@ interface Session {
   fingerprint?: string;
 }
 
+const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3;
 
@@ -116,6 +117,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     setLoading(true);
     let task: ReturnType<typeof startOpenPdf> | undefined;
     try {
+      if (file.size > MAX_LOCAL_PDF_BYTES) {
+        throw new RangeError("This 512 MB+ file exceeds the current foundation limit. Streaming support is planned.");
+      }
       const source = new Uint8Array(await file.arrayBuffer());
       if (generation !== generationRef.current) return;
       if (!source.byteLength) throw new Error("The selected file is empty.");
