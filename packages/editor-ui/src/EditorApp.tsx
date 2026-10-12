@@ -43,7 +43,7 @@ function downloadBlob(name: string, content: Uint8Array): void {
 }
 
 export function EditorApp({ environment, requestedFile }: EditorAppProps) {
-  const lastRequestedFileRef = useRef<File>();
+  const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
