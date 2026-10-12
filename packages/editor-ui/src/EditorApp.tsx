@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
   type Annotation, type CalloutAnnotation, type EditorState
@@ -159,7 +159,7 @@ export function EditorApp({ environment }: EditorAppProps) {
     event.currentTarget.value = "";
   }
 
-  function handleDrop(event: React.DragEvent<HTMLElement>) {
+  function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
     if (!file) return;
