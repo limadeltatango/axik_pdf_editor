@@ -7,6 +7,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const OUT = new URL("../test/fixtures/generated/", import.meta.url);
 const encoder = new TextEncoder();
@@ -133,7 +134,7 @@ const variants = {
 await mkdir(OUT, { recursive: true });
 for (const [filename, pages] of Object.entries(variants)) {
   const bytes = makePdf(pages);
-  const destination = join(OUT.pathname, filename);
+  const destination = join(fileURLToPath(OUT), filename);
   await writeFile(destination, bytes);
   process.stdout.write(filename + " (" + pages.length + " pages, " +
     bytes.byteLength + " bytes)\n");
