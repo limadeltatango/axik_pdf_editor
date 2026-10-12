@@ -1,0 +1,23 @@
+{
+  "name": "axik-pdf-editor",
+  "private": true,
+  "version": "0.0.0-foundation",
+  "type": "module",
+  "description": "Standalone local-first PDF editor: Windows desktop and Chromium extension",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:desktop": "pnpm --filter @axik/desktop dev",
+    "dev:extension": "pnpm --filter @axik/chromium-extension dev",
+    "build:desktop": "pnpm --filter @axik/desktop build",
+    "build:extension": "pnpm --filter @axik/chromium-extension build",
+    "typecheck": "pnpm -r typecheck",
+    "build:all": "pnpm build:extension && pnpm build:desktop"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "@vitejs/plugin-react": "^5.0.0"
+  }
+}
