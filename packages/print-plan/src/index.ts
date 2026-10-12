@@ -3,7 +3,7 @@
  * All units are 1/72 inch. The output is usable by preview and a future native spooler.
  * The current implementation supports a single, fixed stock size only.
  */
-import { visiblePageSize, type PageGeometry } from "@axik/document-core";
+import { visiblePageSize, type Matrix, type PageGeometry } from "@axik/document-core";
 
 export interface PhysicalMedia {
   id: string;
@@ -222,4 +222,19 @@ export function printPlanSummary(plan: PrintPlan): string {
     sum + sheet.faces.filter((face) => !!face.placement).length, 0);
   return pageCount + " page(s) on " + plan.sheets.length + " sheet(s), " +
     plan.media.label + ", " + plan.duplex + ".";
+}
+
+/**
+ * Maps a page already transformed into its ORIENTED, top-left-origin source
+ * rectangle to physical sheet coordinates. The native backend must first apply
+ * the PDF page viewport transformation including CropBox/UserUnit/Rotate.
+ *
+ * A 90-degree value means an additional clockwise sheet rotation. Because the
+ * plan and renderer use this exact matrix, orientation cannot be a hidden
+ * job-global setting.
+ */
+export function placementToSheetMatrix(placement: PagePlacement): Matrix {
+  const { x, y, scale, sourceHeight, sheetRotation } = placement;
+  if (sheetRotation === 0) return [scale, 0, 0, scale, x, y];
+  return [0, scale, -scale, 0, x + sourceHeight * scale, y];
 }
