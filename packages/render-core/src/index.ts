@@ -25,7 +25,8 @@ export class BoundedRenderQueue {
   private readonly maxParallel: number;
   private readonly maxQueued: number;
   private pending: QueuedTask[] = [];
-  private active = new Map<string, AbortController>();
+  private active = new Map<string, Set<AbortController>>();
+  private runningCount = 0;
   private disposed = false;
 
   constructor(maxParallel = 2, maxQueued = 32) {
@@ -52,12 +53,24 @@ export class BoundedRenderQueue {
       const task: QueuedTask = {
         key, priority, controller, reject,
         start: () => {
-          this.active.set(key, controller);
+          const existing = this.active.get(key) ?? new Set<AbortController>();
+          existing.add(controller);
+          this.active.set(key, existing);
+          this.runningCount++;
           Promise.resolve()
-            .then(() => render(controller.signal))
-            .then(resolve, reject)
+            .then(() => {
+              if (controller.signal.aborted) throw abortError("Render job cancelled.");
+              return render(controller.signal);
+            })
+            .then((value) => {
+              if (controller.signal.aborted) reject(abortError("Render job cancelled."));
+              else resolve(value);
+            }, reject)
             .finally(() => {
-              if (this.active.get(key) === controller) this.active.delete(key);
+              this.runningCount--;
+              const activeForKey = this.active.get(key);
+              activeForKey?.delete(controller);
+              if (activeForKey?.size === 0) this.active.delete(key);
               this.pump();
             });
         }
@@ -74,10 +87,11 @@ export class BoundedRenderQueue {
   }
 
   cancel(key: string): void {
-    const controller = this.active.get(key);
-    if (controller) {
-      controller.abort();
-      this.active.delete(key);
+    const controllers = this.active.get(key);
+    if (controllers) {
+      for (const controller of controllers) controller.abort();
+      // The underlying task may ignore cancellation; keep the slot occupied
+      // until its Promise settles to preserve the hard concurrency bound.
     }
     const retained: QueuedTask[] = [];
     for (const task of this.pending) {
@@ -90,8 +104,9 @@ export class BoundedRenderQueue {
   }
 
   cancelAll(): void {
-    for (const controller of this.active.values()) controller.abort();
-    this.active.clear();
+    for (const controllers of this.active.values()) {
+      for (const controller of controllers) controller.abort();
+    }
     for (const task of this.pending) {
       task.controller.abort();
       task.reject(abortError("Render job cancelled."));
@@ -105,11 +120,11 @@ export class BoundedRenderQueue {
   }
 
   get stats(): { running: number; queued: number } {
-    return { running: this.active.size, queued: this.pending.length };
+    return { running: this.runningCount, queued: this.pending.length };
   }
 
   private pump(): void {
-    while (!this.disposed && this.active.size < this.maxParallel && this.pending.length) {
+    while (!this.disposed && this.runningCount < this.maxParallel && this.pending.length) {
       const task = this.pending.shift()!;
       if (!task.controller.signal.aborted) task.start();
     }
