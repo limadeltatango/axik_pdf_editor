@@ -17,7 +17,8 @@ function requestedPdfUrl(): URL | undefined {
 }
 
 function safePdfFilename(url: URL): string {
-  const raw = decodeURIComponent(url.pathname.split("/").pop() || "download.pdf");
+  let raw = url.pathname.split("/").pop() || "download.pdf";
+  try { raw = decodeURIComponent(raw); } catch { /* use raw encoded path */ }
   const sanitized = raw.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").slice(0, 140) || "download.pdf";
   return sanitized.toLowerCase().endsWith(".pdf") ? sanitized : sanitized + ".pdf";
 }
@@ -78,7 +79,7 @@ export function ExternalPdfLoader({ onLoaded }: { onLoaded: (file: File) => void
   async function openLink() {
     // IMPORTANT: permissions.request must originate from this actual click,
     // not from an effect, timer or automatically launched page.
-    const originPattern = url!.origin + "/*";
+    const originPattern = url!.protocol + "//" + url!.hostname + "/*";
     let allowed = false;
     try {
       allowed = await chrome.permissions.request({ origins: [originPattern] });
