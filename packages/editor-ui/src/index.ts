@@ -1,2 +1,3 @@
 export { EditorApp } from "./EditorApp";
 export type { EditorAppProps } from "./EditorApp";
+export { EditorErrorBoundary } from "./ErrorBoundary";
