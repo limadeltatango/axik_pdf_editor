@@ -1,26 +1,36 @@
 # Axik PDF Editor
 
-**Status:** Specification and research only; no application implementation has started.
+**Status (2026-10-12): Draft product specification under review. No application source code or executable has been built.**
 
-Axik PDF Editor is a local-first PDF editing project with two user-facing experiences:
+Axik PDF Editor is a locally running, performance-first Acrobat-class PDF editor with **two independently useful products**:
 
-1. **Desktop:** Windows-first, GPU-aware, highly stable PDF editor with intelligent mixed-orientation printing, callouts, annotations, comments, visual signing, true redaction, page operations, and expanded Acrobat-class features.
-2. **Chromium extension:** Manifest V3 PDF editing interface for Chrome, Edge and compatible Chromium browsers. Common markup and export should work without the desktop program; supported native integration adds advanced printing and document operations.
+1. **Windows desktop application** — correct mixed portrait/landscape printing, standard editable callouts, comments and markup, visual signatures, verified permanent redaction, page operations and expanded PDF editing.
+2. **Chromium Manifest V3 browser extension** — local/offline PDF viewing and annotation (including callouts), comments, visual signatures and PDF export in Chrome and Edge without requiring a desktop app; optional safe native integration adds high-reliability printing and other protected operations.
 
-Both experiences will share the editing model, annotation behavior, UI components where practical, document compatibility rules and test corpus. Performance and reliability are release-blocking requirements.
+### Non-negotiable principles
 
-## Development status
+- **Intelligent printing:** On one fixed physical paper stock, handle mixed source-page orientations without manual page-by-page orientation adjustments; validate preview against physical driver capability.
+- **GPU-aware performance:** Actual accelerated page composition and responsiveness must be benchmarked and shown to improve real workloads. PDF decoding/rasterization and GPU composition are measured separately. CPU fallback is mandatory.
+- **Stability:** Crash containment, cancellable heavy operations, bounded caches and atomic/recoverable saves. No document loss.
+- **Editable, portable annotations:** PDF-native callout geometry (FreeTextCallout), valid appearance streams, Acrobat/PDF-XChange interoperability.
+- **Safety:** Genuine redaction with independent no-leak verification, not opaque overlays; non-certified visual signatures described accurately.
+- **Privacy and independence:** No mandatory Adobe license, cloud upload, account, subscription, background daemon, Axik AI Weave, LLM or runner.
 
-This repository was initialized on 2026-10-12 to develop a detailed specification before implementation. The specification, technical decisions, acceptance test plan and development roadmap are being proposed separately for review.
+## Read the specification
 
-**Constraint:** Do not require, run, schedule or configure Axik AI Weave, local AI runners or related orchestration for this specification work.
+| Document | Description |
+|---|---|
+| [Product Requirements](docs/PRODUCT_REQUIREMENTS.md) | Overall scope, cross-product feature matrix, principles and constraints |
+| [Desktop Specification](docs/DESKTOP_SPEC.md) | Windows UX, deterministic PrintPlan, comments/callouts, redaction, signing, editing |
+| [Chromium Extension Specification](docs/CHROMIUM_EXTENSION_SPEC.md) | MV3 editor, extension-only functionality, browser restrictions, optional native host |
+| [Shared Architecture](docs/SHARED_ARCHITECTURE.md) | Candidate tech stack, GPU rendering strategy, printing model, IPC and security |
+| [Quality and Tests](docs/QUALITY_AND_TESTS.md) | Proposed measurable startup, performance, printer, redaction and stability gates |
+| [Roadmap and Decisions](docs/ROADMAP_AND_DECISIONS.md) | Dependency-ordered work, explicit research spikes and unresolved ADRs |
 
-## Core goals
+**All technical stack options and performance targets are proposals until verified by benchmarks and implementation experiments.** The first phase is design and proof-of-concept qualification, not deployment.
 
-- **Print correctly on the first attempt:** Mixed portrait/landscape documents must use intelligent sheet layout and printer-aware validation.
-- **Be quick:** Measure cold startup, interactive first page, scroll smoothness, memory, CPU and actual GPU usage.
-- **Protect documents:** Lossless open/save where possible, recoverable autosave, genuine redaction and cross-editor annotation interoperability.
-- **Respect privacy:** Process local documents locally by default, without mandatory accounts or cloud uploads.
-- **Remain maintainable:** Versioned interfaces, isolated native capabilities, repeatable performance and stability benchmarks.
+## Development boundaries
 
-See the documentation in the proposed specification branch for detailed functional and nonfunctional requirements.
+- This is a standalone project with its own repo; no cross-project dependency on BuildAxis, OpenStorage, Weave, Arbiter or Atlas.
+- Do **not** run or configure Weave, local AI reviewers, runners, orchestration, GitHub Actions or app builds as part of this specification work.
+- Next steps after specification review: approve scope; collect mixed-orientation physical print fixtures; benchmark accelerated renderers; prototype browser-only standard callout export; evaluate redaction security/licensing.
