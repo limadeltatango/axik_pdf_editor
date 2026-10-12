@@ -14,5 +14,11 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
   },
-  "permissions": []
+  "permissions": [
+    "contextMenus"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
 }
