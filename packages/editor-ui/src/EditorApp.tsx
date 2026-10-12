@@ -105,9 +105,22 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   }, [editor]);
 
   const openFile = useCallback(async (file: File) => {
-    if (session && hasEdits(editor) &&
-      !window.confirm("Current changes are draft-only and are not embedded in the PDF. Open another file?")) {
-      return;
+    if (session && hasEdits(editor)) {
+      if (!window.confirm("Changes are draft-only and not embedded in the PDF. Store the local draft and open another file?")) {
+        return;
+      }
+      if (!session.fingerprint) {
+        setError("The current document is still being identified. Cannot switch safely yet.");
+        return;
+      }
+      try {
+        // Persist the latest edit, not just the last debounced version, before
+        // switching away and destroying the old PDF worker.
+        await writeDraft(session.fingerprint, editor);
+      } catch (reason) {
+        setError("Cannot store current draft. Document switch cancelled: " + pdfError(reason));
+        return;
+      }
     }
     const generation = ++generationRef.current;
     setError(undefined);
