@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Axik PDF Editor",
+  "version": "0.0.1",
+  "identifier": "ai.axik.pdfeditor",
+  "build": {
+    "beforeDevCommand": "pnpm dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Axik PDF Editor — Foundation",
+        "width": 1280,
+        "height": 850,
+        "minWidth": 880,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' blob: data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none';"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
