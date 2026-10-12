@@ -1,0 +1,13 @@
+[package]
+name = "axik_pdf_editor"
+version = "0.0.1"
+description = "Local-first Axik PDF Editor desktop foundation"
+authors = ["Axik AI"]
+edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+tauri = { version = "2" }
