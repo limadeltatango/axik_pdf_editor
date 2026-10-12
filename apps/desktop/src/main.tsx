@@ -1,9 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { EditorApp } from "@axik/editor-ui";
+import { EditorApp, EditorErrorBoundary } from "@axik/editor-ui";
 
 const mount = document.getElementById("root");
 if (!mount) throw new Error("Axik editor root element is missing.");
 createRoot(mount).render(
-  <React.StrictMode><EditorApp environment="desktop" /></React.StrictMode>
+  <React.StrictMode><EditorErrorBoundary><EditorApp environment="desktop" /></EditorErrorBoundary></React.StrictMode>
 );
