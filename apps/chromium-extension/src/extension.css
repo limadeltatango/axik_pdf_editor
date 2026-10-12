@@ -1,0 +1,23 @@
+.external-pdf-banner {
+  position: fixed;
+  z-index: 150;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(96vw, 1100px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #213c54;
+  color: #eff6ff;
+  border: 1px solid #5994c8;
+  border-radius: 8px;
+  box-shadow: 0 6px 30px #07111caa;
+  padding: 12px 16px;
+  font-size: 12px;
+}
+.external-pdf-banner strong { word-break: break-all; }
+.external-pdf-banner button { white-space: nowrap; }
+.external-pdf-banner [role="alert"] { color: #ffb7b7; }
+.external-pdf-note { color: #b0c8db; width: 100%; font-size: 11px; }
