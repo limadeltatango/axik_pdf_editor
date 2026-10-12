@@ -51,6 +51,7 @@ export function PrintPlanPanel({ pdf, onClose }: {
   }, [pdf]);
 
   let plan: PrintPlan | undefined;
+  let planError: string | undefined;
   try {
     if (pages) {
       plan = planFixedMedia({
@@ -59,7 +60,7 @@ export function PrintPlanPanel({ pdf, onClose }: {
       });
     }
   } catch (reason) {
-    error = reason instanceof Error ? reason.message : "Invalid print options.";
+    planError = reason instanceof Error ? reason.message : "Invalid print options.";
   }
 
   return <div className="modal-backdrop">
@@ -92,7 +93,7 @@ export function PrintPlanPanel({ pdf, onClose }: {
         </label>
       </div>
       {!pages && !error && <p role="status">Reading page geometry: {count} / {pdf.numPages}</p>}
-      {error && <p role="alert" className="error">{error}</p>}
+      {(error || planError) && <p role="alert" className="error">{error || planError}</p>}
       {plan && <>
         <p>{printPlanSummary(plan)}</p>
         {plan.warnings.length > 0 && (
