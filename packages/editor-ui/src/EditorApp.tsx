@@ -14,6 +14,8 @@ import "./styles.css";
 
 export interface EditorAppProps {
   environment: "desktop" | "extension";
+  /** Optional user-approved file supplied by the Chromium link acquisition UI. */
+  requestedFile?: File;
 }
 
 interface Session {
@@ -40,7 +42,8 @@ function downloadBlob(name: string, content: Uint8Array): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function EditorApp({ environment }: EditorAppProps) {
+export function EditorApp({ environment, requestedFile }: EditorAppProps) {
+  const lastRequestedFileRef = useRef<File>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
@@ -152,6 +155,14 @@ export function EditorApp({ environment }: EditorAppProps) {
       if (generation === generationRef.current) setLoading(false);
     }
   }, [editor, session]);
+
+
+  useEffect(() => {
+    if (requestedFile && requestedFile !== lastRequestedFileRef.current) {
+      lastRequestedFileRef.current = requestedFile;
+      void openFile(requestedFile);
+    }
+  }, [requestedFile, openFile]);
 
   function handleChooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
