@@ -93,3 +93,8 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   .toolstrip { overflow-x: auto; }
   .topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
+
+.crash-boundary { margin: auto; max-width: 620px; padding: 32px;
+  background: #253951; border: 1px solid #b55a59; border-radius: 12px; }
+.crash-boundary p { line-height: 1.5; color: #d6e3f0; }
+.crash-boundary pre { white-space: pre-wrap; overflow-wrap: anywhere; }
