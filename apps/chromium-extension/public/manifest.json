@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Axik PDF Editor — Foundation",
+  "description": "Local-first PDF viewing and annotation drafts. Portable edit export and printing are not available yet.",
+  "version": "0.0.1",
+  "minimum_chrome_version": "120",
+  "action": {
+    "default_title": "Open Axik PDF Editor"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
+  },
+  "permissions": []
+}
