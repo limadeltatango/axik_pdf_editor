@@ -392,7 +392,35 @@ export function EditorApp({
   }
 
   async function saveAsFile() {
-    if (!session || exporting || !supportsSavePicker()) return;
+    if (!session || exporting || (!supportsSavePicker() && !onNativeSaveAs)) return;
+    if(onNativeSaveAs){
+      setExporting(true);
+      setError(undefined);
+      const started=performance.now();
+      diagnostics.record("document","PDF_SAVE_AS_START");
+      let preview:PdfDocument|undefined;
+      try {
+        const result=await exportEditedPdf(session.source,editor.annotations);
+        preview=await preparePdfForSave(result.bytes);
+        const suggested=session.name.replace(/\.pdf$/i,"")+"-edited.pdf";
+        const outcome=await onNativeSaveAs(result.bytes,suggested);
+        if(!outcome)return;
+        const fingerprint=await documentFingerprint(result.bytes);
+        await finishSavedPdf(result.bytes,outcome.name,undefined,fingerprint,preview,outcome.token);
+        preview=undefined;
+        diagnostics.record("document","PDF_SAVE_AS_OK","info",{
+          durationMs:performance.now()-started
+        });
+        setNotice("New PDF saved natively as "+outcome.name+". Existing original remains unchanged.");
+      }catch(reason){
+        diagnostics.recordError("document","PDF_SAVE_AS_FAILED",reason);
+        setError("Native Save As failed: "+pdfError(reason));
+      }finally{
+        if(preview)await preview.destroy().catch(()=>undefined);
+        setExporting(false);
+      }
+      return;
+    }
     // IMPORTANT: invoke the OS picker before any await that would lose the
     // transient user activation needed in Chromium extension pages.
     let target: ExplicitFileHandle;
@@ -431,7 +459,42 @@ export function EditorApp({
   }
 
   async function saveCurrentFile() {
-    if (!session?.writableHandle || !session.fingerprint || !dirty || exporting) return;
+    if(!session || !session.fingerprint || !dirty || exporting)return;
+    if(session.nativeToken && onNativeSave){
+      if(!window.confirm(
+        "SAVE WILL OVERWRITE THIS PDF. Axik will preserve an automatic "+
+        "backup of the original next to it. Continue?"
+      ))return;
+      setExporting(true);
+      setError(undefined);
+      const started=performance.now();
+      diagnostics.record("document","PDF_SAVE_START");
+      let preview:PdfDocument|undefined;
+      try{
+        const result=await exportEditedPdf(session.source,editor.annotations);
+        preview=await preparePdfForSave(result.bytes);
+        const outcome=await onNativeSave(session.nativeToken,result.bytes);
+        const fingerprint=await documentFingerprint(result.bytes);
+        await finishSavedPdf(result.bytes,outcome.name,undefined,fingerprint,preview,outcome.token);
+        preview=undefined;
+        diagnostics.record("document","PDF_SAVE_OK","info",{
+          durationMs:performance.now()-started
+        });
+        setNotice("PDF saved; original preserved in automatic backup "+
+          (outcome.backupName||"next to the source PDF")+".");
+      }catch(reason){
+        diagnostics.recordError("document","PDF_SAVE_FAILED",reason,{
+          durationMs:performance.now()-started
+        });
+        setError("Native Save failed: "+pdfError(reason)+
+          ". If Windows created a backup, preserve it for recovery.");
+      }finally{
+        if(preview)await preview.destroy().catch(()=>undefined);
+        setExporting(false);
+      }
+      return;
+    }
+    if(!session.writableHandle)return;
     // A separately selected backup is REQUIRED by the alpha before overwriting.
     // Native desktop backup generation will later remove this extra picker.
     let backup: ExplicitFileHandle;
@@ -513,18 +576,21 @@ export function EditorApp({
           </button>
           <button
             onClick={() => void saveAsFile()}
-            disabled={!session || exporting || !supportsSavePicker()}
-            title={supportsSavePicker() ?
-              "Save as a new PDF filename (never overwrite a nonempty destination)" :
-              "This WebView does not support File System Access; use Quick Export"}>
+            disabled={!session || exporting || !(onNativeSaveAs || supportsSavePicker())}
+            title={onNativeSaveAs || supportsSavePicker() ?
+              "Save as a new PDF (never overwrite a nonempty destination)" :
+              "Save As unavailable in this environment; use Quick Export"}>
             Save As…
           </button>
           <button
             onClick={() => void saveCurrentFile()}
-            disabled={!session?.writableHandle || !session.fingerprint || !dirty || exporting}
-            title={session?.writableHandle ?
-              "Overwrite this source only after choosing and verifying a separate backup" :
-              "Open with the editable file picker to enable safe overwrite; ordinary imports remain read-only"}>
+            disabled={!(session?.writableHandle || (session?.nativeToken && onNativeSave)) ||
+              !session?.fingerprint || !dirty || exporting}
+            title={session?.nativeToken && onNativeSave ?
+              "Native Save uses an automatic backup and Windows atomic replacement" :
+              session?.writableHandle ?
+                "Overwrite this source only after choosing and verifying a separate backup" :
+                "Open with the native/approved file picker to enable Save"}>
             Save
           </button>
           <button onClick={() => {
