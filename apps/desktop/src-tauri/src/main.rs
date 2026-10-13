@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod native_files;
+mod native_printers;
 
 use std::{fs, io::Write, path::Path, time::{Duration, SystemTime}};
 use tauri::Manager;
@@ -70,6 +71,8 @@ fn main() {
             open_print_ready_pdf,
             native_files::open_native_pdf,
             native_files::save_native_pdf,
+            native_printers::list_native_printers,
+            native_printers::get_native_printer_capabilities,
             native_files::save_native_pdf_as
         ])
         .run(tauri::generate_context!())
