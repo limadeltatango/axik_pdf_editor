@@ -66,7 +66,7 @@ The ZIP is a small self-contained archive using uncompressed STORE entries with 
 |---|---|
 | `README.txt` | How to use/share safely and the exact content exclusions |
 | `manifest.json` | Report format/schema, app version, desktop/extension, record counts, enabled state, persistence health and inclusion flags |
-| `events.jsonl` | One strictly whitelisted structured JSON event per line, oldest to newest |
+| `events.jsonl` | One strictly whitelisted structured JSON event per line, oldest to newest |\n| `summary.json` | Counts per event and P50/P95/max timings without personal document data |
 | `environment.json` | Only when selected: browser/OS, display viewport, approximate hardware concurrency/RAM and optionally identifiable WebGL GPU vendor/renderer |
 
 The ZIP limits are eight entries maximum, 4 MiB per entry and 8 MiB total. When the report exceeds limits, export fails visibly, rather than silently dropping information or uploading it elsewhere.
