@@ -1,17 +1,18 @@
 import {useEffect,useState} from "react";
 import {type Annotation,normalizeRotation,type Rotation} from "@axik/document-core";
 import {applyPageOperations,type PageOperation} from "@axik/page-operations";
-import {exportEditedPdf} from "@axik/pdf-writer";
+import {exportEditedPdf,planAnnotationEdits} from "@axik/pdf-writer";
 import {diagnostics} from "@axik/diagnostics";
 import type {PdfDocument} from "./pdf";
 
 /** Author page changes as a new PDF; never overwrite the drawing set directly. */
 export function PageOperationsPanel({
-  pdf,source,annotations,name,onClose
+  pdf,source,annotations,importedAnnotations,name,onClose
 }:{
   pdf:PdfDocument;
   source:Uint8Array;
   annotations:readonly Annotation[];
+  importedAnnotations?:readonly Annotation[];
   name:string;
   onClose:()=>void;
 }){
@@ -49,8 +50,12 @@ export function PageOperationsPanel({
     if(busy||!pages.length)return;
     setBusy(true);setError(undefined);setSuccess(undefined);
     try{
-      const edited=annotations.length
-        ? (await exportEditedPdf(source,annotations)).bytes : source;
+      const mutations=planAnnotationEdits(importedAnnotations??[],annotations);
+      const edited=mutations.changes.length || mutations.removeNames.length
+        ? (await exportEditedPdf(source,mutations.changes,{
+            removeNames:mutations.removeNames
+          })).bytes
+        : source;
       const result=await applyPageOperations(edited,pages);
       const bytes=new Uint8Array(result.bytes.byteLength);
       bytes.set(result.bytes);
