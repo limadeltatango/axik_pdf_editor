@@ -1,3 +1,4 @@
+import { diagnostics } from "@axik/diagnostics";
 import { useEffect, useState } from "react";
 import { normalizeRotation, type PageGeometry } from "@axik/document-core";
 import {
@@ -62,6 +63,21 @@ export function PrintPlanPanel({ pdf, onClose }: {
   } catch (reason) {
     planError = reason instanceof Error ? reason.message : "Invalid print options.";
   }
+
+  useEffect(() => {
+    if (!pages) return;
+    try {
+      const completed = planFixedMedia({
+        pages, media: MEDIA.find((paper) => paper.id === medium) ?? MEDIA[0]!,
+        margins: DEFAULT_MARGINS, scaling: scale, duplex
+      });
+      diagnostics.record("print", "PRINT_PLAN_OK", "info", {
+        sheetCount: completed.sheets.length, warningCount: completed.warnings.length
+      });
+    } catch (reason) {
+      diagnostics.recordError("print", "PRINT_PLAN_FAILED", reason);
+    }
+  }, [pages, medium, scale, duplex]);
 
   return <div className="modal-backdrop">
     <section className="print-panel" role="dialog" aria-modal="true" aria-label="Print planning preview">

@@ -66,3 +66,17 @@ These are future operator commands, **not commands performed for this commit**:
 ## Review contract
 
 Treat every feature listed as source implementation only. Do not label this branch production-ready, merge to main as a finished product, install it on work machines for sensitive documents, or turn on printing/redaction workflows until explicit acceptance tests pass. The P0 product requirements in PRODUCT_REQUIREMENTS.md remain the target, NOT the current implementation state.
+
+---
+
+### Superseding development authorization and diagnostic branch
+
+The no-Weave development restriction described above applies to the *original
+foundation coding pass*. On October 12, 2026 (Eastern time), the owner explicitly
+authorized use of Axik AI Weave for subsequent development and testing.
+
+Separate feature work in `feat/local-diagnostics-support-bundle` introduces a
+user-exportable local diagnostics ZIP and instrumentation:
+[Diagnostics spec](DIAGNOSTICS.md) / [APDF-38](https://axikai.atlassian.net/browse/APDF-38).
+Its code must remain runtime-independent of Weave. Tests and binary qualification
+are not implied by committed diagnostic source.

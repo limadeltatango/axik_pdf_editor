@@ -1,3 +1,4 @@
+import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
 import { useState } from "react";
 
 const MAX_REMOTE_PDF_BYTES = 200 * 1024 * 1024;
@@ -88,6 +89,7 @@ export function ExternalPdfLoader({ onLoaded }: { onLoaded: (file: File) => void
       return;
     }
     if (!allowed) {
+      diagnostics.record("extension", "EXTENSION_PERMISSION_DENIED", "warn");
       setError("Site permission was denied. Download the PDF and choose it manually instead.");
       return;
     }
@@ -95,11 +97,20 @@ export function ExternalPdfLoader({ onLoaded }: { onLoaded: (file: File) => void
     setController(pending);
     setError(undefined);
     setBusy(true);
+    const downloadStart = performance.now();
+    diagnostics.record("extension", "EXTENSION_FETCH_START");
     try {
       const file = await fetchPdf(url!, pending.signal);
+      diagnostics.record("extension", "EXTENSION_FETCH_OK", "info", {
+        durationMs: performance.now() - downloadStart,
+        fileSizeBucketMiB: fileSizeBucketMiB(file.size)
+      });
       onLoaded(file);
       setLoaded(true);
     } catch (reason) {
+      diagnostics.recordError("extension", "EXTENSION_FETCH_FAILED", reason, {
+        durationMs: performance.now() - downloadStart
+      });
       setError(reason instanceof Error ? reason.message : "Could not retrieve this PDF.");
     } finally {
       setBusy(false);

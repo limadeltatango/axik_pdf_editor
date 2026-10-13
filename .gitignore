@@ -13,3 +13,6 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/Cargo.lock
 # Lockfiles will be committed once dependency resolution is validated.
 pnpm-lock.yaml
+
+# Never commit user-generated support bundles.
+axik-pdf-diagnostics-*.zip

@@ -7,6 +7,8 @@ import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
   type DraftRecord
 } from "@axik/recovery";
+import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
@@ -59,7 +61,12 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const [showPrintPlan, setShowPrintPlan] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [journalStatus, setJournalStatus] = useState("No draft edits");
+
+  useEffect(() => {
+    diagnostics.record("app", "APP_READY");
+  }, []);
 
   // Clean up worker memory when a document is replaced or this component closes.
   useEffect(() => () => { void session?.pdf.destroy(); }, [session?.pdf]);
@@ -69,10 +76,22 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     let active = true;
     setActivePage(undefined);
     if (session?.pdf) {
+      const start = performance.now();
+      diagnostics.record("document", "PDF_PAGE_LOAD_START", "info", {
+        pageIndex: pageNumber - 1
+      });
       session.pdf.getPage(pageNumber).then((page) => {
-        if (active) setActivePage(page);
+        if (active) {
+          setActivePage(page);
+          diagnostics.record("document", "PDF_PAGE_LOAD_OK", "info", {
+            pageIndex: pageNumber - 1, durationMs: performance.now() - start
+          });
+        }
       }).catch((reason: unknown) => {
-        if (active) setError(pdfError(reason));
+        if (active) {
+          setError(pdfError(reason));
+          diagnostics.recordError("document", "PDF_PAGE_LOAD_FAILED", reason);
+        }
       });
     }
     return () => { active = false; };
@@ -85,8 +104,12 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     setJournalStatus("Saving draft locally…");
     const timer = window.setTimeout(() => {
       void writeDraft(fingerprint, editor)
-        .then(() => setJournalStatus("Draft stored on this device (not exported to PDF)"))
+        .then(() => {
+          setJournalStatus("Draft stored on this device (not exported to PDF)");
+          diagnostics.record("storage", "DRAFT_WRITE_OK");
+        })
         .catch((reason: unknown) => {
+          diagnostics.recordError("storage", "DRAFT_WRITE_FAILED", reason);
           setJournalStatus("Draft storage failed");
           setError("Draft recovery could not be saved: " + pdfError(reason));
         });
@@ -128,6 +151,11 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     setRecovery(undefined);
     setJournalStatus("No draft edits");
     setLoading(true);
+    const openStart = performance.now();
+    const sizeBucket = fileSizeBucketMiB(file.size);
+    diagnostics.record("document", "PDF_OPEN_START", "info", {
+      fileSizeBucketMiB: sizeBucket
+    });
     let task: ReturnType<typeof startOpenPdf> | undefined;
     try {
       if (file.size > MAX_LOCAL_PDF_BYTES) {
@@ -142,6 +170,10 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         await pdf.destroy();
         return;
       }
+      diagnostics.record("document", "PDF_OPEN_OK", "info", {
+        durationMs: performance.now() - openStart,
+        fileSizeBucketMiB: sizeBucket, pageCount: pdf.numPages
+      });
       setSession({ name: file.name, source, pdf });
       setPageNumber(1);
       setZoom(1);
@@ -161,10 +193,14 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         }
       }).catch((reason: unknown) => {
         if (generation === generationRef.current) {
+          diagnostics.recordError("storage", "DRAFT_READ_FAILED", reason);
           setError("Draft recovery unavailable: " + pdfError(reason));
         }
       });
     } catch (reason) {
+      diagnostics.recordError("document", "PDF_OPEN_FAILED", reason, {
+        durationMs: performance.now() - openStart, fileSizeBucketMiB: sizeBucket
+      });
       setError(pdfError(reason));
       // If loading failed, leave the previous document open.
       if (task) await task.destroy().catch(() => undefined);
@@ -202,6 +238,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     if (!recovery) return;
     try {
       setEditor(initialEditorState(recovery.annotations));
+      diagnostics.record("annotation", "ANNOTATION_RESTORED", "info", {
+        annotationCount: recovery.annotations.length
+      });
       setRecovery(undefined);
       setNotice("Recovered draft loaded. Export to an edited PDF is not available yet.");
     } catch (reason) {
@@ -221,6 +260,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const addCallout = (annotation: CalloutAnnotation) => {
     try {
       setEditor((previous) => applyCommand(previous, { type: "add", annotation }));
+      diagnostics.record("annotation", "ANNOTATION_ADDED", "info", {
+        pageIndex: annotation.pageIndex
+      });
       setSelectedId(annotation.id);
       setTool("select");
     } catch (reason) {
@@ -245,6 +287,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
 
   function exportOriginal() {
     if (!session || dirty) {
+      diagnostics.record("document", "PDF_EXPORT_BLOCKED", "warn");
       setError("Edited PDF export is not implemented. The original will not be misrepresented as edited.");
       return;
     }
@@ -269,7 +312,11 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
             title={dirty ? "Edited PDF export is pending a validated writer" : "Download a copy of the unchanged original"}>
             Export original
           </button>
-          <button onClick={() => setShowPrintPlan(true)} disabled={!session}>Layout preview</button>
+          <button onClick={() => {
+            diagnostics.record("print", "PRINT_PLAN_OPEN");
+            setShowPrintPlan(true);
+          }} disabled={!session}>Layout preview</button>
+          <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
       </header>
@@ -362,6 +409,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         onClose={() => setShowPrintPlan(false)} />}
+      {showDiagnostics && <DiagnosticsPanel runtime={
+        environment === "desktop" ? "desktop" : "chromium-extension"
+      } version="0.0.1" onClose={() => setShowDiagnostics(false)} />}
     </main>
   );
 }
