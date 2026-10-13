@@ -1,0 +1,290 @@
+import {
+  PDFArray, PDFDocument, PDFHexString, PDFName, PDFString,
+  StandardFonts, type PDFFont
+} from "pdf-lib";
+import {
+  calloutToStandardPayload, validateAnnotation,
+  type Annotation, type CalloutAnnotation, type Point
+} from "@axik/document-core";
+
+const MAX_INPUT_BYTES = 100 * 1024 * 1024;
+const FONT_KEY = "AxikHelv";
+
+export interface PdfExportResult {
+  bytes: Uint8Array;
+  calloutsWritten: number;
+  warnings: string[];
+}
+
+function safePdfNumber(value: number): string {
+  if (!Number.isFinite(value) || Math.abs(value) > 1e9) {
+    throw new RangeError("Invalid PDF graphics coordinate.");
+  }
+  return String(Math.round(value * 1000) / 1000);
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255
+  ];
+}
+
+function sanitizeForBaseFont(value: string, font: PDFFont): string {
+  // Preserve original Unicode text in /Contents. The current built-in
+  // appearance font is Helvetica WinAnsi; missing glyphs are displayed as '?'.
+  let safe = "";
+  for (const char of value) {
+    if (char === "\r") continue;
+    if (char === "\n" || char === "\t") {
+      safe += char === "\t" ? "    " : "\n";
+      continue;
+    }
+    try {
+      font.encodeText(char);
+      safe += char;
+    } catch {
+      safe += "?";
+    }
+  }
+  return safe;
+}
+
+function wrapLines(font: PDFFont, value: string, width: number, fontSize: number): string[] {
+  const all: string[] = [];
+  const maxWidth = Math.max(fontSize, width);
+  for (const paragraph of value.split("\n")) {
+    const words = paragraph.split(/\s+/);
+    let line = "";
+    for (const word of words) {
+      // Break extremely long tokens at glyph boundaries.
+      let remaining = word;
+      while (remaining && font.widthOfTextAtSize(remaining, fontSize) > maxWidth) {
+        let prefix = "";
+        for (const letter of remaining) {
+          if (prefix && font.widthOfTextAtSize(prefix + letter, fontSize) > maxWidth) break;
+          prefix += letter;
+        }
+        if (line) {
+          all.push(line);
+          line = "";
+        }
+        all.push(prefix);
+        remaining = remaining.slice(prefix.length);
+      }
+      const proposed = line ? line + " " + remaining : remaining;
+      if (line && font.widthOfTextAtSize(proposed, fontSize) > maxWidth) {
+        all.push(line);
+        line = remaining;
+      } else {
+        line = proposed;
+      }
+    }
+    all.push(line);
+  }
+  return all;
+}
+
+function appearanceCommands(annotation: CalloutAnnotation, font: PDFFont, rect: readonly number[]): string {
+  const [minX = 0, minY = 0] = rect;
+  const p = (point: Point): string =>
+    safePdfNumber(point.x - minX) + " " + safePdfNumber(point.y - minY);
+  const box = annotation.box;
+  const left = box.x - minX;
+  const bottom = box.y - minY;
+  const stroke = hexToRgb(annotation.style.stroke).map(safePdfNumber).join(" ");
+  const fill = hexToRgb(annotation.style.fill).map(safePdfNumber).join(" ");
+  const width = Math.max(0.25, annotation.style.lineWidth);
+  const size = annotation.style.fontSize;
+  const cmds: string[] = [
+    "q",
+    safePdfNumber(width) + " w",
+    stroke + " RG",
+    fill + " rg",
+    [
+      safePdfNumber(left), safePdfNumber(bottom),
+      safePdfNumber(box.width), safePdfNumber(box.height), "re B"
+    ].join(" "),
+    stroke + " RG",
+    annotation.leader.map((point, i) =>
+      p(point) + (i === 0 ? " m" : " l")).join("\n"),
+    "S"
+  ];
+
+  if (annotation.arrowHead !== "none" && annotation.leader.length >= 2) {
+    const tip = annotation.leader[0]!;
+    const next = annotation.leader[1]!;
+    const vx = next.x - tip.x;
+    const vy = next.y - tip.y;
+    const length = Math.hypot(vx, vy);
+    if (length > 0.01) {
+      const unitX = vx / length;
+      const unitY = vy / length;
+      const size = Math.max(7, width * 6);
+      const end = {
+        x: tip.x + unitX * size,
+        y: tip.y + unitY * size
+      };
+      const sideA = { x: end.x - unitY * size * 0.40, y: end.y + unitX * size * 0.40 };
+      const sideB = { x: end.x + unitY * size * 0.40, y: end.y - unitX * size * 0.40 };
+      cmds.push(
+        stroke + " rg",
+        p(tip) + " m",
+        p(sideA) + " l",
+        p(sideB) + " l",
+        "h",
+        annotation.arrowHead === "closed" ? "B" : "S"
+      );
+    }
+  }
+
+  const safe = sanitizeForBaseFont(annotation.text, font);
+  const lines = wrapLines(font, safe, Math.max(10, box.width - 12), size);
+  const allowedLines = Math.max(0, Math.floor((box.height - 12) / (size * 1.24)));
+  const visibleLines = lines.slice(0, Math.min(allowedLines, 80));
+  const lineHeight = size * 1.24;
+
+  cmds.push(
+    "0.09 0.14 0.20 rg",
+    "BT",
+    "/" + FONT_KEY + " " + safePdfNumber(size) + " Tf",
+    "1 0 0 1 " + safePdfNumber(left + 6) + " " +
+      safePdfNumber(bottom + box.height - size - 5) + " Tm"
+  );
+  for (const [index, line] of visibleLines.entries()) {
+    if (index !== 0) cmds.push("0 " + safePdfNumber(-lineHeight) + " Td");
+    // PDFHexString from font is a valid encoded PDF text operand.
+    cmds.push(font.encodeText(line).toString() + " Tj");
+  }
+  cmds.push("ET", "Q");
+  return cmds.join("\n") + "\n";
+}
+
+function isoPdfDate(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return "D:" + date.getUTCFullYear() + pad(date.getUTCMonth() + 1) +
+    pad(date.getUTCDate()) + pad(date.getUTCHours()) + pad(date.getUTCMinutes()) +
+    pad(date.getUTCSeconds()) + "Z";
+}
+
+function addCallout(doc: PDFDocument, font: PDFFont, annotation: CalloutAnnotation): void {
+  validateAnnotation(annotation);
+  if (annotation.pageIndex >= doc.getPageCount()) throw new RangeError("Annotation page does not exist.");
+  const page = doc.getPage(annotation.pageIndex);
+  const context = doc.context;
+  const payload = calloutToStandardPayload(annotation);
+  const rect = [...payload.rect];
+  const w = rect[2]! - rect[0]!;
+  const h = rect[3]! - rect[1]!;
+  if (w <= 0 || h <= 0 || w > 1e7 || h > 1e7) {
+    throw new RangeError("Callout appearance bounds invalid.");
+  }
+
+  const appearanceStream = context.flateStream(
+    appearanceCommands(annotation, font, rect),
+    {
+      Type: PDFName.of("XObject"),
+      Subtype: PDFName.of("Form"),
+      FormType: 1,
+      BBox: [0, 0, w, h],
+      Resources: { Font: { [FONT_KEY]: font.ref } }
+    }
+  );
+  const appearanceRef = context.register(appearanceStream);
+  const stroke = hexToRgb(annotation.style.stroke);
+  const textBox = payload.textBoxRect;
+  // PDF /RD stores the differences between annotation Rect and text-box edges.
+  const rd = [
+    textBox[0]! - rect[0]!, textBox[1]! - rect[1]!,
+    rect[2]! - textBox[2]!, rect[3]! - textBox[3]!
+  ];
+  const author = (annotation.author || "Axik PDF").slice(0, 80);
+  const state = context.obj({
+    Type: PDFName.of("Annot"),
+    Subtype: PDFName.of("FreeText"),
+    IT: PDFName.of("FreeTextCallout"),
+    Rect: rect,
+    RD: rd,
+    CL: [...payload.calloutLine],
+    LE: PDFName.of(annotation.arrowHead === "closed" ? "ClosedArrow" :
+      annotation.arrowHead === "open" ? "OpenArrow" : "None"),
+    Contents: PDFHexString.fromText(annotation.text),
+    T: PDFHexString.fromText(author),
+    NM: PDFHexString.fromText(annotation.id),
+    M: PDFString.of(isoPdfDate(new Date(annotation.updatedAt))),
+    F: 4, // Print flag: exported annotations appear on printed pages.
+    Q: 0,
+    DA: PDFString.of("/" + FONT_KEY + " " + safePdfNumber(annotation.style.fontSize) + " Tf 0 0 0 rg"),
+    DS: PDFString.of("font: " + safePdfNumber(annotation.style.fontSize) +
+      "pt Helvetica; color: #17212c;"),
+    BS: { W: annotation.style.lineWidth, S: PDFName.of("S") },
+    C: stroke,
+    CA: annotation.style.opacity,
+    AP: { N: appearanceRef }
+  });
+  const reference = context.register(state);
+  const existing = page.node.lookup(PDFName.of("Annots"), PDFArray);
+  if (existing) {
+    existing.push(reference);
+  } else {
+    page.node.set(PDFName.of("Annots"), context.obj([reference]));
+  }
+}
+
+/**
+ * ALPHA: Write PDF-native, editable FreeText callout dictionaries and appearance
+ * streams for a bounded source PDF. Visual rendering and interoperability with
+ * Acrobat/PDF-XChange still require external validation.
+ *
+ * Never overwrite the original; caller should download a separate edited copy.
+ */
+export async function exportEditedPdf(
+  original: Uint8Array,
+  annotations: readonly Annotation[]
+): Promise<PdfExportResult> {
+  if (!original.byteLength || original.byteLength > MAX_INPUT_BYTES) {
+    throw new RangeError("The alpha writer supports source PDFs up to 100 MiB.");
+  }
+  if (annotations.length > 1_000) {
+    throw new RangeError("The alpha writer supports up to 1,000 callouts.");
+  }
+  for (const annotation of annotations) {
+    validateAnnotation(annotation);
+    if (annotation.kind !== "callout") {
+      throw new Error("The alpha writer only exports native callouts, not sticky notes.");
+    }
+  }
+
+  const doc = await PDFDocument.load(original.slice(), {
+    updateMetadata: false,
+    ignoreEncryption: false
+  });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const warnings: string[] = [];
+  for (const annotation of annotations) {
+    if (annotation.style.opacity !== 1) {
+      warnings.push("Alpha appearance currently treats opacity as fully opaque.");
+    }
+    const sanitized = sanitizeForBaseFont(annotation.text, font);
+    if (sanitized !== annotation.text.replace(/\r/g, "")) {
+      warnings.push("Unsupported Helvetica glyphs were substituted in visual appearance; /Contents retains original text.");
+    }
+    const visibleRows = wrapLines(font, sanitized, Math.max(10, annotation.box.width - 12), annotation.style.fontSize);
+    if (visibleRows.length > Math.floor((annotation.box.height - 12) / (annotation.style.fontSize * 1.24))) {
+      warnings.push("One or more long callout labels may be clipped visually; full text remains in /Contents.");
+    }
+    addCallout(doc, font, annotation);
+  }
+  // Full rewrite avoids leaving an appended incremental state in ordinary edits;
+  // this is NOT a secure redaction/sanitization implementation.
+  const bytes = await doc.save({ useObjectStreams: true, addDefaultPage: false });
+  if (bytes.length < 8 || new TextDecoder().decode(bytes.subarray(0, 8)).indexOf("%PDF") < 0) {
+    throw new Error("The PDF writer did not return a valid PDF header.");
+  }
+  return {
+    bytes,
+    calloutsWritten: annotations.length,
+    warnings: [...new Set(warnings)]
+  };
+}
