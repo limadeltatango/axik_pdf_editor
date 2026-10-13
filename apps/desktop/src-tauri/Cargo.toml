@@ -13,3 +13,11 @@ tauri-build = { version = "2" }
 tauri = { version = "2" }
 open = "5"
 tempfile = "3"
+
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+serde = { version = "1", features = ["derive"] }
+rfd = "0.15"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
