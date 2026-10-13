@@ -193,3 +193,20 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   .diagnostics-event { grid-template-columns: 65px 1fr; }
   .diagnostics-event span { display: none; }
 }
+
+.diagnostics-timing-summary {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  color: #e2eaf7;
+}
+.diagnostics-timing-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #34506c;
+  padding: 5px 0;
+}
+.diagnostics-timing-summary code { color: #c6ddf6; overflow-wrap: anywhere; }
+.diagnostics-timing-summary span { color: #b4cae2; white-space: nowrap; }
