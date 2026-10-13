@@ -110,12 +110,14 @@ export function newCallout({
   };
   const elbow: Point = { x: (tip.x + attachment.x) / 2, y: tip.y };
   const timestamp = now.toISOString();
-  return validateAnnotation({
+  const annotation: CalloutAnnotation = {
     id, pageIndex, kind: "callout", intent: "FreeTextCallout", text,
     box, leader: [tip, elbow, attachment],
     arrowHead: "closed", style: { ...DEFAULT_CALLOUT_STYLE },
     createdAt: timestamp, updatedAt: timestamp
-  });
+  };
+  validateAnnotation(annotation);
+  return annotation;
 }
 
 export interface StandardCalloutPayload {
