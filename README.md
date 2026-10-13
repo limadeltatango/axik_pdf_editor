@@ -22,6 +22,25 @@ Both products share annotation geometry, edit commands, drawing behavior and qua
 
 **Start here:** [Current foundation status and safe next steps](docs/FOUNDATION_IMPLEMENTATION_STATUS.md).
 
+## Early-stage diagnostic bundles
+
+The desktop and Chromium foundation now include a **Diagnostics** panel with bounded
+local event recording, a recording toggle, clear-history control, and an optional
+environment/GPU information export. Click **Export diagnostics ZIP** to download a
+report you can inspect and attach to ChatGPT or an APDF issue. No PDF contents,
+filenames, document paths, annotation text, URLs or raw exception messages are
+collected by this recorder, and nothing uploads automatically.
+
+The diagnostic exporter is source-coded but still needs build, ZIP compatibility,
+privacy, crash recovery and cross-browser verification. Read
+[Local Diagnostics Specification](docs/DIAGNOSTICS.md) and
+[APDF-38](https://axikai.atlassian.net/browse/APDF-38).
+
+**Updated authorization:** Axik AI Weave is now permitted for development and
+testing when supported and appropriate (authorization given October 12, 2026
+Eastern time). The editor itself has no runtime Weave dependency. The prior
+no-Weave restriction was historical for foundation coding, not an ongoing ban.
+
 ## Proposed local development workflow (not executed yet)
 
 Prerequisites for subsequent validation: Node 22+, pnpm, Rust stable and Windows Tauri/MSVC/WebView2 dependencies. Only the extension requires a Chromium browser.
