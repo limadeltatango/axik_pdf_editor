@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  createSupportBundle, diagnostics, downloadSupportBundle,
+  createSupportBundle, diagnostics, downloadSupportBundle, summarizeDiagnostics,
   type DiagnosticRuntime, type RecentDiagnostics
 } from "@axik/diagnostics";
 
@@ -81,6 +81,10 @@ export function DiagnosticsPanel({ runtime, version, onClose }: DiagnosticsPanel
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, 12) ?? [];
 
+  const fullSummary = summarizeDiagnostics(
+    recent?.sessions.flatMap((session) => session.events) ?? []
+  );
+
   return (
     <div className="modal-backdrop">
       <section className="diagnostics-panel" role="dialog" aria-modal="true"
@@ -105,8 +109,18 @@ export function DiagnosticsPanel({ runtime, version, onClose }: DiagnosticsPanel
           </p>
           <div className="diagnostics-counter">
             <strong>{recent?.eventCount ?? "…"}</strong> recent event(s) across
-            {" "}<strong>{recent?.sessions.length ?? "…"}</strong> session(s)
+            {" "}<strong>{recent?.sessions.length ?? "…"}</strong> session(s);
+            {" "}<strong>{fullSummary.errorEvents}</strong> error event(s)
           </div>
+          {fullSummary.timings.length > 0 && <div className="diagnostics-timing-summary">
+            <strong>Highest P95 operation timings</strong>
+            {fullSummary.timings.slice(0, 4).map((timing) =>
+              <div key={timing.code}>
+                <code>{timing.code}</code>
+                <span>P95 {timing.p95Ms} ms ({timing.samples} sample(s))</span>
+              </div>
+            )}
+          </div>}
           {recent && !recent.localStorageAvailable && (
             <p className="diagnostics-warning">Persistent diagnostics storage is unavailable.
               Only events still in memory may be exported.</p>
