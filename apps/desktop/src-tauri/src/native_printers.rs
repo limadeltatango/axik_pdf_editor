@@ -41,7 +41,7 @@ pub struct NativePrinterCapabilities {
 mod win {
     use super::{NativePrinter,NativePaper,NativePrinterCapabilities};
     use std::ptr::{null, null_mut};
-    use std::mem::{size_of,MaybeUninit};
+    use std::mem::size_of;
     use std::os::windows::ffi::OsStrExt;
     use std::ffi::OsStr;
     use windows_sys::Win32::Graphics::Printing::{
@@ -135,9 +135,11 @@ mod win {
             });
         }
         let count=n as usize;
-        let mut paper_codes=vec![0u16;count];
-        let mut paper_names=vec![0u16;count*64];
-        let mut dimensions=vec![0i32;count*2];
+        // Allocate for the entire validated upper limit in case capabilities
+        // change between the initial query and the driver's follow-up copy.
+        let mut paper_codes=vec![0u16;256];
+        let mut paper_names=vec![0u16;256*64];
+        let mut dimensions=vec![0i32;256*2];
         let count_codes=device_query(&wide,DC_PAPERS,paper_codes.as_mut_ptr());
         let count_names=device_query(&wide,DC_PAPERNAMES,paper_names.as_mut_ptr());
         let count_sizes=device_query(&wide,DC_PAPERSIZE,dimensions.as_mut_ptr() as *mut u16);
