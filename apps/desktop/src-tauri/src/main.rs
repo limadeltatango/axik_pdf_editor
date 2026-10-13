@@ -1,5 +1,6 @@
-mod native_files;
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod native_files;
 
 use std::{fs, io::Write, path::Path, time::{Duration, SystemTime}};
 use tauri::Manager;
