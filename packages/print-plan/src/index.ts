@@ -79,6 +79,87 @@ export const LEGAL_PORTRAIT: PhysicalMedia = {
 export const TABLOID_PORTRAIT: PhysicalMedia = {
   id: "na-tabloid", label: "Tabloid (11 x 17 in)", width: 792, height: 1224
 };
+/** Architectural sheet sizes in PDF points. The printer driver must still support them. */
+export const ARCH_C_PORTRAIT: PhysicalMedia = {
+  id: "na-arch-c", label: "ARCH C (18 x 24 in)", width: 1296, height: 1728
+};
+export const ARCH_D_PORTRAIT: PhysicalMedia = {
+  id: "na-arch-d", label: "ARCH D (24 x 36 in)", width: 1728, height: 2592
+};
+export const ARCH_E_PORTRAIT: PhysicalMedia = {
+  id: "na-arch-e", label: "ARCH E (36 x 48 in)", width: 2592, height: 3456
+};
+
+/** Driver-advertised media measured in millimeters, not proof of loaded stock. */
+export interface DriverPaper {
+  code: number;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+}
+export interface DriverPrinterCapabilities {
+  printerName: string;
+  duplexAdvertised: boolean;
+  colorAdvertised: boolean;
+  papers: readonly DriverPaper[];
+  capabilityQuerySucceeded: boolean;
+  caveat: string;
+}
+export interface InstalledPrinter {
+  name: string;
+  isLocal: boolean;
+  isNetwork: boolean;
+}
+
+export interface PrinterMediaCheck {
+  paper: "supported" | "unsupported" | "unknown";
+  duplex: "supported" | "unsupported" | "unknown";
+  matchedPaper?: DriverPaper;
+  note: string;
+}
+
+/**
+ * Compare against dimensions, never translated driver paper names. Require
+ * both dimensions in physical points converted to millimeters. A printer with
+ * contradictory or unreported capabilities stays UNKNOWN, not "supported".
+ */
+export function checkPrinterMedia(
+  media: PhysicalMedia,
+  duplex: DuplexMode,
+  capabilities: DriverPrinterCapabilities,
+  toleranceMm = 1.5
+): PrinterMediaCheck {
+  const expectedX = media.width * 25.4 / 72;
+  const expectedY = media.height * 25.4 / 72;
+  const valid = capabilities.papers.filter(p =>
+    Number.isFinite(p.widthMm) && Number.isFinite(p.heightMm) &&
+    p.widthMm > 0 && p.heightMm > 0
+  );
+  const matchedPaper = valid.find(p =>
+    (Math.abs(p.widthMm - expectedX) <= toleranceMm &&
+      Math.abs(p.heightMm - expectedY) <= toleranceMm) ||
+    (Math.abs(p.heightMm - expectedX) <= toleranceMm &&
+      Math.abs(p.widthMm - expectedY) <= toleranceMm)
+  );
+  const paper = !capabilities.capabilityQuerySucceeded || !valid.length
+    ? "unknown" as const
+    : matchedPaper ? "supported" as const : "unsupported" as const;
+  const requiresDuplex = duplex !== "simplex";
+  const duplexStatus = !requiresDuplex
+    ? "supported" as const
+    : !capabilities.capabilityQuerySucceeded
+      ? "unknown" as const
+      : capabilities.duplexAdvertised ? "supported" as const : "unsupported" as const;
+  return {
+    paper, duplex: duplexStatus, matchedPaper,
+    note: paper === "supported"
+      ? "Driver advertises this paper size. Verify the tray, hard margins and actual physical stock."
+      : paper === "unknown"
+        ? "Paper support could not be confirmed from this printer driver."
+        : "Selected printer did not advertise this physical paper size."
+  };
+}
+
 export const DEFAULT_MARGINS: PrintMargins = {
   left: 18, right: 18, top: 18, bottom: 18
 };
