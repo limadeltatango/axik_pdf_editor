@@ -37,6 +37,8 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
 
     // Reopen the saved PDF and edit the native annotation from the Axik sidebar.
     await tab.locator('input[type="file"]').setInputFiles(draft);
+    await expect(tab.locator(".filename")).toHaveText("draft.pdf",{timeout:20_000});
+    await expect(tab.getByRole("button",{name:"Callout"})).toBeEnabled({timeout:20_000});
     const importedItem=tab.locator(".comment-item").filter({
       hasText:"Original coordination request"
     });
@@ -44,9 +46,13 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
     await importedItem.click();
     await expect(tab.getByLabel("Callout text")).toBeVisible();
     await tab.getByLabel("Callout text").fill("Approved revised coordination request");
+    await expect(tab.getByLabel("Callout text")).toHaveValue("Approved revised coordination request");
+    await expect(importedItem).toContainText("Approved revised coordination request");
     const secondDownload=tab.waitForEvent("download");
     await tab.getByRole("button",{name:"Quick Export"}).click();
-    await (await secondDownload).saveAs(updated);
+    const second=await secondDownload;
+    expect(second.suggestedFilename()).toContain("-axik-edited.pdf");
+    await second.saveAs(updated);
 
     const result=await PDFDocument.load(new Uint8Array(await readFile(updated)));
     const annots=result.getPage(0).node.lookup(PDFName.of("Annots"),PDFArray);
