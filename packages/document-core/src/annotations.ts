@@ -47,7 +47,22 @@ export interface TextBoxAnnotation extends AnnotationBase {
   style: AnnotationStyle;
 }
 
-export type Annotation = CalloutAnnotation | StickyNoteAnnotation | TextBoxAnnotation;
+/**
+ * Visible, non-cryptographic ink only. NEVER market as a certified,
+ * identity-verified, or tamper-evident signature.
+ */
+export interface VisualSignatureAnnotation extends AnnotationBase {
+  kind: "signature";
+  intent: "VisualInkSignature";
+  text: string; // nonpersonal, fixed explanatory label
+  box: Rect;
+  /** Pen strokes normalized to [0,1] for source independent scaling. */
+  strokes: readonly (readonly Point[])[];
+  color: string;
+  lineWidth: number;
+}
+
+export type Annotation = CalloutAnnotation | StickyNoteAnnotation | TextBoxAnnotation | VisualSignatureAnnotation;
 export type AnnotationKind = Annotation["kind"];
 
 const MAX_ANNOTATION_TEXT = 20_000;
@@ -83,6 +98,32 @@ export function validateAnnotation(value: Annotation): Annotation {
   if (value.text.length > MAX_ANNOTATION_TEXT) throw new RangeError("Annotation text too long.");
   if (value.kind === "note") {
     if (!isPoint(value.position)) throw new RangeError("Invalid note position.");
+    return value;
+  }
+  if (value.kind === "signature") {
+    if(value.intent !== "VisualInkSignature" || !isRect(value.box) ||
+      typeof value.text !== "string" ||
+      value.text !== "Visible signature (not digitally certified)" ||
+      !HEX.test(value.color) ||
+      !Number.isFinite(value.lineWidth) || value.lineWidth <= 0 ||
+      value.lineWidth > 20 ||
+      !Array.isArray(value.strokes) ||
+      value.strokes.length < 1 || value.strokes.length > 50
+    ) throw new RangeError("Invalid visual signature.");
+    let points=0;
+    for(const stroke of value.strokes){
+      if(!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 1000){
+        throw new RangeError("Visual signature contains an invalid stroke.");
+      }
+      points+=stroke.length;
+      for(const point of stroke){
+        if(!isPoint(point) || point.x < 0 || point.x > 1 ||
+          point.y < 0 || point.y > 1){
+          throw new RangeError("Visual signature coordinates are outside the signing canvas.");
+        }
+      }
+    }
+    if(points>10000)throw new RangeError("Visual signature is too complex.");
     return value;
   }
   if (value.kind === "text") {
@@ -229,4 +270,35 @@ export function newStickyNote({
   };
   validateAnnotation(note);
   return note;
+}
+
+
+export function newVisualSignature({
+  id,pageIndex,location,pageBounds,strokes,
+  color="#17212c",lineWidth=1.6,now=new Date()
+}:{
+  id:string;pageIndex:number;location:Point;pageBounds:Rect;
+  strokes:readonly (readonly Point[])[];
+  color?:string;lineWidth?:number;now?:Date;
+}):VisualSignatureAnnotation {
+  if(!isPoint(location)||!isRect(pageBounds)){
+    throw new RangeError("Invalid signature location.");
+  }
+  const width=Math.min(210,pageBounds.width);
+  const height=Math.min(74,pageBounds.height);
+  const box:Rect={
+    x:clamp(location.x,pageBounds.x,pageBounds.x+pageBounds.width-width),
+    y:clamp(location.y-height,pageBounds.y,pageBounds.y+pageBounds.height-height),
+    width,height
+  };
+  const timestamp=now.toISOString();
+  const annotation:VisualSignatureAnnotation={
+    id,pageIndex,box,
+    kind:"signature",intent:"VisualInkSignature",
+    text:"Visible signature (not digitally certified)",
+    strokes:strokes.map(stroke=>stroke.map(p=>({x:p.x,y:p.y}))),
+    color,lineWidth,createdAt:timestamp,updatedAt:timestamp
+  };
+  validateAnnotation(annotation);
+  return annotation;
 }
