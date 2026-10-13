@@ -8,6 +8,7 @@ import {
   type DraftRecord
 } from "@axik/recovery";
 import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
+import { exportEditedPdf } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
@@ -58,6 +59,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const [showPrintPlan, setShowPrintPlan] = useState(false);
@@ -285,6 +287,33 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     editor.annotations.find((annotation) => annotation.id === selectedId);
   const dirty = hasEdits(editor);
 
+  async function exportEdited() {
+    if (!session || !dirty || exporting) return;
+    setExporting(true);
+    setError(undefined);
+    const started = performance.now();
+    try {
+      const result = await exportEditedPdf(session.source, editor.annotations);
+      const filename = session.name.replace(/\.pdf$/i, "") + "-axik-edited.pdf";
+      downloadBlob(filename, result.bytes);
+      diagnostics.record("document", "PDF_EXPORT_OK", "info", {
+        durationMs: performance.now() - started,
+        annotationCount: result.calloutsWritten
+      });
+      setNotice("Edited PDF download requested: " + filename +
+        ". Native callout annotations were written. " +
+        (result.warnings.length ? result.warnings.join(" ") :
+          "Reopen the downloaded PDF to verify appearance before relying on it."));
+    } catch (reason) {
+      diagnostics.recordError("document", "PDF_EXPORT_FAILED", reason, {
+        durationMs: performance.now() - started
+      });
+      setError("Could not write the edited PDF: " + pdfError(reason));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function exportOriginal() {
     if (!session || dirty) {
       diagnostics.record("document", "PDF_EXPORT_BLOCKED", "warn");
@@ -308,9 +337,14 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           <button onClick={() => fileInputRef.current?.click()} disabled={loading}>
             {loading ? "Opening…" : "Open PDF"}
           </button>
-          <button onClick={exportOriginal} disabled={!session || dirty}
+          <button onClick={exportOriginal} disabled={!session || dirty || exporting}
             title={dirty ? "Edited PDF export is pending a validated writer" : "Download a copy of the unchanged original"}>
             Export original
+          </button>
+          <button onClick={() => void exportEdited()}
+            disabled={!session || !dirty || exporting}
+            title="Download a separate edited PDF with native FreeText callout annotations">
+            {exporting ? "Saving…" : "Export edited PDF"}
           </button>
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
@@ -402,8 +436,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           <div className="sidebar-footer">
             <strong>Save status</strong>
             <p>{dirty ? journalStatus : "No unsaved annotations"}</p>
-            <p className="muted">True redaction, PDF export with edits, signing and hardware printing
-              are disabled pending their dedicated backends.</p>
+            <p className="muted">Alpha PDF export writes native callouts to a new PDF.
+              Long text, transparency and some fonts remain limited. True redaction,
+              visual signing and printer-driver control are not implemented.</p>
           </div>
         </aside>
       </div>

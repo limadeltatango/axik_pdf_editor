@@ -1,0 +1,54 @@
+name: Prototype validation and Chromium package
+
+on:
+  push:
+    branches:
+      - feat/prototype-alpha-20261013
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apdf-prototype-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prototype:
+    name: Typecheck, test, build extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Verify types
+        run: pnpm typecheck
+      - name: Run unit tests
+        run: pnpm test
+      - name: Bundle Chromium extension
+        run: pnpm build:extension
+      - name: Validate generated Manifest V3 package
+        run: node tools/check-extension-package.mjs
+      - name: Install Chromium for browser integration test
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test extension in actual Chromium
+        run: pnpm test:e2e
+      - name: Package prototype
+        run: |
+          cd apps/chromium-extension/dist
+          zip -qr ../../../axik-pdf-chromium-prototype.zip .
+      - name: Upload installable prototype
+        uses: actions/upload-artifact@v4
+        with:
+          name: axik-pdf-chromium-prototype
+          path: axik-pdf-chromium-prototype.zip
+          if-no-files-found: error
+          retention-days: 14

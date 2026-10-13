@@ -70,7 +70,7 @@ export function PageCanvas({
         background: "rgb(255,255,255)"
       });
       cancelRender = () => task.cancel();
-      const transform = view.transform as Matrix;
+      const transform = view.transform as unknown as Matrix;
       if (!cancelled) {
         setViewport({ width: view.width, height: view.height, transform });
       }

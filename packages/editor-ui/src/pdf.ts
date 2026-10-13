@@ -16,7 +16,6 @@ export function startOpenPdf(bytes: Uint8Array): PdfLoadingTask {
   const workerBytes = bytes.slice();
   return pdfjs.getDocument({
     data: workerBytes,
-    isEvalSupported: false,
     useSystemFonts: true
   });
 }
