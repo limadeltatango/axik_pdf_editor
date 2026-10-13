@@ -44,10 +44,13 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
     });
     await expect(importedItem).toBeVisible({timeout:20_000});
     await importedItem.click();
+    const selectedItem=tab.locator(".comment-item.selected");
+    await expect(selectedItem).toBeVisible();
     await expect(tab.getByLabel("Callout text")).toBeVisible();
     await tab.getByLabel("Callout text").fill("Approved revised coordination request");
     await expect(tab.getByLabel("Callout text")).toHaveValue("Approved revised coordination request");
-    await expect(importedItem).toContainText("Approved revised coordination request");
+    // The locator must not filter on the old text, which disappears after edit.
+    await expect(selectedItem).toContainText("Approved revised coordination request");
     const secondDownload=tab.waitForEvent("download");
     await tab.getByRole("button",{name:"Quick Export"}).click();
     const second=await secondDownload;
