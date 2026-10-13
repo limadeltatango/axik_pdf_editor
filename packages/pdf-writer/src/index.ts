@@ -4,7 +4,7 @@ import {
 } from "pdf-lib";
 import {
   calloutToStandardPayload, validateAnnotation,
-  type Annotation, type CalloutAnnotation, type Point
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type Point
 } from "@axik/document-core";
 
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
@@ -233,6 +233,55 @@ function addCallout(doc: PDFDocument, font: PDFFont, annotation: CalloutAnnotati
   }
 }
 
+
+function addFreeText(doc:PDFDocument,font:PDFFont,a:TextBoxAnnotation):void{
+  validateAnnotation(a);
+  if(a.pageIndex>=doc.getPageCount())throw new RangeError("Text box page does not exist.");
+  const page=doc.getPage(a.pageIndex);
+  const context=doc.context;
+  const {box}=a;
+  const size=a.style.fontSize;
+  const safe=sanitizeForBaseFont(a.text,font);
+  const lines=wrapLines(font,safe,Math.max(12,box.width-12),size)
+    .slice(0,Math.max(0,Math.min(100,Math.floor((box.height-12)/(size*1.24)))));
+  const color=hexToRgb(a.style.stroke).map(safePdfNumber).join(" ");
+  const stream=[
+    "q",color+" rg","BT","/"+FONT_KEY+" "+safePdfNumber(size)+" Tf",
+    "1 0 0 1 6 "+safePdfNumber(box.height-size-5)+" Tm",
+    ...lines.flatMap((line,i)=>[
+      ...(i ? ["0 "+safePdfNumber(-size*1.24)+" Td"] : []),
+      font.encodeText(line).toString()+" Tj"
+    ]),
+    "ET","Q"
+  ].join("\n")+"\n";
+  const appearance=context.register(context.flateStream(stream,{
+    Type:PDFName.of("XObject"),
+    Subtype:PDFName.of("Form"),
+    FormType:1,
+    BBox:[0,0,box.width,box.height],
+    Resources:{Font:{[FONT_KEY]:font.ref}}
+  }));
+  const dict=context.obj({
+    Type:PDFName.of("Annot"),
+    Subtype:PDFName.of("FreeText"),
+    Rect:[box.x,box.y,box.x+box.width,box.y+box.height],
+    Contents:PDFHexString.fromText(a.text),
+    T:PDFHexString.fromText((a.author||"Axik PDF").slice(0,80)),
+    NM:PDFHexString.fromText(a.id),
+    M:PDFString.of(isoPdfDate(new Date(a.updatedAt))),
+    F:4,Q:0,
+    DA:PDFString.of("/"+FONT_KEY+" "+safePdfNumber(size)+" Tf "+color+" rg"),
+    DS:PDFString.of("font: "+safePdfNumber(size)+"pt Helvetica;"),
+    C:hexToRgb(a.style.stroke),
+    AP:{N:appearance}
+  });
+  const ref=context.register(dict);
+  const raw=page.node.get(PDFName.of("Annots"));
+  const existing=raw?context.lookup(raw,PDFArray):undefined;
+  if(existing)existing.push(ref);
+  else page.node.set(PDFName.of("Annots"),context.obj([ref]));
+}
+
 /**
  * ALPHA: Write PDF-native, editable FreeText callout dictionaries and appearance
  * streams for a bounded source PDF. Visual rendering and interoperability with
@@ -250,13 +299,13 @@ export async function exportEditedPdf(
   if (annotations.length > 1_000) {
     throw new RangeError("The alpha writer supports up to 1,000 callouts.");
   }
-  const callouts: CalloutAnnotation[] = [];
-  for (const annotation of annotations) {
+  const supported: (CalloutAnnotation|TextBoxAnnotation)[] = [];
+  for(const annotation of annotations){
     validateAnnotation(annotation);
-    if (annotation.kind !== "callout") {
-      throw new Error("The alpha writer only exports native callouts, not sticky notes.");
+    if(annotation.kind==="note"){
+      throw new Error("Sticky notes still require a validated native PDF annotation writer.");
     }
-    callouts.push(annotation);
+    supported.push(annotation);
   }
 
   const doc = await PDFDocument.load(original.slice(), {
@@ -265,7 +314,7 @@ export async function exportEditedPdf(
   });
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const warnings: string[] = [];
-  for (const annotation of callouts) {
+  for (const annotation of supported) {
     if (annotation.style.opacity !== 1) {
       warnings.push("Alpha appearance currently treats opacity as fully opaque.");
     }
@@ -275,9 +324,10 @@ export async function exportEditedPdf(
     }
     const visibleRows = wrapLines(font, sanitized, Math.max(10, annotation.box.width - 12), annotation.style.fontSize);
     if (visibleRows.length > Math.floor((annotation.box.height - 12) / (annotation.style.fontSize * 1.24))) {
-      warnings.push("One or more long callout labels may be clipped visually; full text remains in /Contents.");
+      warnings.push("One or more long labels may be clipped visually; full text remains in /Contents.");
     }
-    addCallout(doc, font, annotation);
+    if(annotation.kind==="callout")addCallout(doc,font,annotation);
+    else addFreeText(doc,font,annotation);
   }
   // Full rewrite avoids leaving an appended incremental state in ordinary edits;
   // this is NOT a secure redaction/sanitization implementation.
