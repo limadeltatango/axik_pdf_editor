@@ -121,7 +121,7 @@ export function DiagnosticsPanel({ runtime, version, onClose }: DiagnosticsPanel
               </div>
             )}
           </div>}
-          {recent && !recent.localStorageAvailable && (
+          {recent && !recent.persistentStorageAvailable && (
             <p className="diagnostics-warning">Persistent diagnostics storage is unavailable.
               Only events still in memory may be exported.</p>
           )}
