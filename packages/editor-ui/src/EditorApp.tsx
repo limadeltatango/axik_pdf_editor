@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
-  type Annotation, type CalloutAnnotation, type EditorState
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -12,6 +12,7 @@ import { exportEditedPdf } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
+import { PageOperationsPanel } from "./PageOperationsPanel";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
@@ -24,6 +25,12 @@ export interface EditorAppProps {
   environment: "desktop" | "extension";
   /** Optional user-approved file supplied by the Chromium link acquisition UI. */
   requestedFile?: File;
+  /** Desktop-only, privileged, explicit user-action print file handoff. */
+  onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
+  onNativeOpen?: ()=>Promise<{name:string;token:string;bytes:Uint8Array}|null>;
+  onNativeSave?: (token:string,bytes:Uint8Array)=>Promise<{name:string;token:string;backupName?:string|null}>;
+  onNativeSaveAs?: (bytes:Uint8Array,suggestedName:string)=>
+    Promise<{name:string;token:string;backupName?:string|null}|null>;
 }
 
 interface Session {
@@ -32,6 +39,7 @@ interface Session {
   source: Uint8Array;
   fingerprint?: string;
   writableHandle?: ExplicitFileHandle;
+  nativeToken?: string;
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
@@ -52,7 +60,9 @@ function downloadBlob(name: string, content: Uint8Array): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function EditorApp({ environment, requestedFile }: EditorAppProps) {
+export function EditorApp({
+  environment,requestedFile,onNativePrint,onNativeOpen,onNativeSave,onNativeSaveAs
+}: EditorAppProps) {
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
@@ -60,7 +70,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [activePage, setActivePage] = useState<PdfPage>();
   const [pageNumber, setPageNumber] = useState(1);
   const [zoom, setZoom] = useState(1);
-  const [tool, setTool] = useState<"select" | "callout">("select");
+  const [tool, setTool] = useState<"select" | "callout" | "text" | "note">("select");
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
@@ -69,6 +79,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const [showPrintPlan, setShowPrintPlan] = useState(false);
+  const [showPageOperations, setShowPageOperations] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [journalStatus, setJournalStatus] = useState("No draft edits");
 
@@ -135,7 +146,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     return () => window.removeEventListener("beforeunload", warnUnsaved);
   }, [editor]);
 
-  const openFile = useCallback(async (file: File, writableHandle?: ExplicitFileHandle) => {
+  const openFile = useCallback(async (file: File, writableHandle?: ExplicitFileHandle, nativeToken?: string) => {
     if (session && hasEdits(editor)) {
       if (!window.confirm("Changes are draft-only and not embedded in the PDF. Store the local draft and open another file?")) {
         return;
@@ -182,7 +193,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         durationMs: performance.now() - openStart,
         fileSizeBucketMiB: sizeBucket, pageCount: pdf.numPages
       });
-      setSession({ name: file.name, source, pdf, writableHandle });
+      setSession({ name: file.name, source, pdf, writableHandle, nativeToken });
       setPageNumber(1);
       setZoom(1);
       setTool("select");
@@ -226,6 +237,18 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   }, [requestedFile, openFile]);
 
   async function choosePdf() {
+    if(onNativeOpen){
+      try {
+        const opened=await onNativeOpen();
+        if(!opened)return;
+        const copy=new Uint8Array(opened.bytes.byteLength);
+        copy.set(opened.bytes);
+        await openFile(new File([copy.buffer],opened.name,{type:"application/pdf"}),undefined,opened.token);
+      }catch(reason){
+        setError("Native Open failed: "+pdfError(reason));
+      }
+      return;
+    }
     if (!supportsEditablePicker()) {
       fileInputRef.current?.click();
       return;
@@ -279,7 +302,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     setRecovery(undefined);
   }
 
-  const addCallout = (annotation: CalloutAnnotation) => {
+  const addCallout = (annotation: Annotation) => {
     try {
       setEditor((previous) => applyCommand(previous, { type: "add", annotation }));
       diagnostics.record("annotation", "ANNOTATION_ADDED", "info", {
@@ -292,7 +315,10 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     }
   };
 
-  function changeCallout(annotation: CalloutAnnotation, text: string) {
+  const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
+  const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
+
+  function changeMarkupText(annotation: Annotation, text: string) {
     try {
       setEditor((previous) => applyCommand(previous, {
         type: "replace",
@@ -350,11 +376,11 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   }
 
   async function finishSavedPdf(
-    bytes: Uint8Array, name: string, handle: ExplicitFileHandle,
-    fingerprint: string, pdf: PdfDocument
+    bytes: Uint8Array, name: string, handle: ExplicitFileHandle | undefined,
+    fingerprint: string, pdf: PdfDocument, nativeToken?: string
   ) {
     const prior = session?.fingerprint;
-    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf });
+    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf, nativeToken });
     setEditor(initialEditorState());
     setPageNumber(1);
     setSelectedId(undefined);
@@ -366,7 +392,35 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   }
 
   async function saveAsFile() {
-    if (!session || exporting || !supportsSavePicker()) return;
+    if (!session || exporting || (!supportsSavePicker() && !onNativeSaveAs)) return;
+    if(onNativeSaveAs){
+      setExporting(true);
+      setError(undefined);
+      const started=performance.now();
+      diagnostics.record("document","PDF_SAVE_AS_START");
+      let preview:PdfDocument|undefined;
+      try {
+        const result=await exportEditedPdf(session.source,editor.annotations);
+        preview=await preparePdfForSave(result.bytes);
+        const suggested=session.name.replace(/\.pdf$/i,"")+"-edited.pdf";
+        const outcome=await onNativeSaveAs(result.bytes,suggested);
+        if(!outcome)return;
+        const fingerprint=await documentFingerprint(result.bytes);
+        await finishSavedPdf(result.bytes,outcome.name,undefined,fingerprint,preview,outcome.token);
+        preview=undefined;
+        diagnostics.record("document","PDF_SAVE_AS_OK","info",{
+          durationMs:performance.now()-started
+        });
+        setNotice("New PDF saved natively as "+outcome.name+". Existing original remains unchanged.");
+      }catch(reason){
+        diagnostics.recordError("document","PDF_SAVE_AS_FAILED",reason);
+        setError("Native Save As failed: "+pdfError(reason));
+      }finally{
+        if(preview)await preview.destroy().catch(()=>undefined);
+        setExporting(false);
+      }
+      return;
+    }
     // IMPORTANT: invoke the OS picker before any await that would lose the
     // transient user activation needed in Chromium extension pages.
     let target: ExplicitFileHandle;
@@ -405,7 +459,42 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   }
 
   async function saveCurrentFile() {
-    if (!session?.writableHandle || !session.fingerprint || !dirty || exporting) return;
+    if(!session || !session.fingerprint || !dirty || exporting)return;
+    if(session.nativeToken && onNativeSave){
+      if(!window.confirm(
+        "SAVE WILL OVERWRITE THIS PDF. Axik will preserve an automatic "+
+        "backup of the original next to it. Continue?"
+      ))return;
+      setExporting(true);
+      setError(undefined);
+      const started=performance.now();
+      diagnostics.record("document","PDF_SAVE_START");
+      let preview:PdfDocument|undefined;
+      try{
+        const result=await exportEditedPdf(session.source,editor.annotations);
+        preview=await preparePdfForSave(result.bytes);
+        const outcome=await onNativeSave(session.nativeToken,result.bytes);
+        const fingerprint=await documentFingerprint(result.bytes);
+        await finishSavedPdf(result.bytes,outcome.name,undefined,fingerprint,preview,outcome.token);
+        preview=undefined;
+        diagnostics.record("document","PDF_SAVE_OK","info",{
+          durationMs:performance.now()-started
+        });
+        setNotice("PDF saved; original preserved in automatic backup "+
+          (outcome.backupName||"next to the source PDF")+".");
+      }catch(reason){
+        diagnostics.recordError("document","PDF_SAVE_FAILED",reason,{
+          durationMs:performance.now()-started
+        });
+        setError("Native Save failed: "+pdfError(reason)+
+          ". If Windows created a backup, preserve it for recovery.");
+      }finally{
+        if(preview)await preview.destroy().catch(()=>undefined);
+        setExporting(false);
+      }
+      return;
+    }
+    if(!session.writableHandle)return;
     // A separately selected backup is REQUIRED by the alpha before overwriting.
     // Native desktop backup generation will later remove this extra picker.
     let backup: ExplicitFileHandle;
@@ -470,7 +559,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
       <header className="topbar">
         <div className="app-brand">
           <span className="app-symbol">A</span>
-          <div><strong>Axik PDF Editor</strong><small>{environment === "desktop" ? "Desktop foundation" : "Chromium extension foundation"}</small></div>
+          <div><strong>Axik PDF Editor</strong><small>{environment === "desktop" ? "Desktop Core Alpha" : "Chromium Core Alpha"}</small></div>
         </div>
         <div className="filename" title={session?.name ?? "No PDF loaded"}>
           {session?.name ?? "No document open"}
@@ -487,24 +576,30 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           </button>
           <button
             onClick={() => void saveAsFile()}
-            disabled={!session || exporting || !supportsSavePicker()}
-            title={supportsSavePicker() ?
-              "Save as a new PDF filename (never overwrite a nonempty destination)" :
-              "This WebView does not support File System Access; use Quick Export"}>
+            disabled={!session || exporting || !(onNativeSaveAs || supportsSavePicker())}
+            title={onNativeSaveAs || supportsSavePicker() ?
+              "Save as a new PDF (never overwrite a nonempty destination)" :
+              "Save As unavailable in this environment; use Quick Export"}>
             Save As…
           </button>
           <button
             onClick={() => void saveCurrentFile()}
-            disabled={!session?.writableHandle || !session.fingerprint || !dirty || exporting}
-            title={session?.writableHandle ?
-              "Overwrite this source only after choosing and verifying a separate backup" :
-              "Open with the editable file picker to enable safe overwrite; ordinary imports remain read-only"}>
+            disabled={!(session?.writableHandle || (session?.nativeToken && onNativeSave)) ||
+              !session?.fingerprint || !dirty || exporting}
+            title={session?.nativeToken && onNativeSave ?
+              "Native Save uses an automatic backup and Windows atomic replacement" :
+              session?.writableHandle ?
+                "Overwrite this source only after choosing and verifying a separate backup" :
+                "Open with the native/approved file picker to enable Save"}>
             Save
           </button>
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
             setShowPrintPlan(true);
-          }} disabled={!session}>Layout preview</button>
+          }} disabled={!session}>Print</button>
+          <button onClick={()=>setShowPageOperations(true)} disabled={!session}>
+            Pages
+          </button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
@@ -516,6 +611,12 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         <button aria-pressed={tool === "callout"} disabled={!session}
           className={tool === "callout" ? "active" : ""}
           onClick={() => setTool("callout")}>Callout ↗</button>
+        <button aria-pressed={tool === "text"} disabled={!session}
+          className={tool === "text" ? "active" : ""}
+          onClick={() => setTool("text")}>Add Text</button>
+        <button aria-pressed={tool === "note"} disabled={!session}
+          className={tool === "note" ? "active" : ""}
+          onClick={() => setTool("note")}>Comment</button>
         <span className="separator" />
         <button disabled={!editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={!editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
@@ -529,7 +630,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         <span className="zoom-display">{Math.round(zoom * 100)}%</span>
         <button disabled={!session} onClick={() => setZoom((n) => Math.min(MAX_ZOOM, Math.round((n + .2) * 10) / 10))}>+</button>
         <span className="spacer" />
-        <span className="prototype-label">Foundation · Not production-ready</span>
+        <span className="prototype-label">Core Alpha · Not production-ready</span>
       </div>
       {error && <div className="message error" role="alert">{error} <button onClick={() => setError(undefined)}>Dismiss</button></div>}
       {recovery && <div className="message recover" role="status">
@@ -557,11 +658,13 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
                 tool={tool}
                 annotations={editor.annotations}
                 selectedAnnotationId={selectedId}
-                onSelect={setSelectedId} onAddCallout={addCallout}
+                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
               />
               <p className="workspace-tip">
-                {tool === "callout" ? "Click the document where the arrow should point." :
-                  "Click a callout to edit its text in the right-hand panel."}
+                {tool === "callout" ? "Click where the callout arrow should point." :
+                  tool === "text" ? "Click to place an editable text box." :
+                  tool === "note" ? "Click to leave a sticky note comment." :
+                  "Select a callout or added text box to edit it."}
               </p>
             </div>
           )}
@@ -574,21 +677,38 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
               onClick={() => { setPageNumber(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
-              <strong>{annotation.kind === "callout" ? "Callout" : "Note"} · Page {annotation.pageIndex + 1}</strong>
+              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
           ))}
-          {selectedAnnotation?.kind === "callout" && <>
-            <label className="editor-label" htmlFor="callout-text">Callout text</label>
+          {selectedAnnotation && <>
+            <label className="editor-label" htmlFor="callout-text">
+              {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
+            </label>
             <textarea id="callout-text" value={selectedAnnotation.text}
-              onChange={(event) => changeCallout(selectedAnnotation, event.target.value)}
+              onChange={(event) => changeMarkupText(selectedAnnotation, event.target.value)}
               rows={5} maxLength={20000} />
+            {selectedAnnotation.kind !== "note" && <>
+            <label className="editor-label" htmlFor="markup-font-size">Font size (points)</label>
+            <input id="markup-font-size" className="markup-number"
+              type="number" min={4} max={200}
+              value={selectedAnnotation.style.fontSize}
+              onChange={event=>{
+                const size=Number(event.target.value);
+                if(!Number.isFinite(size)||size<4||size>200)return;
+                setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                  ...selectedAnnotation,
+                  style:{...selectedAnnotation.style,fontSize:size},
+                  updatedAt:new Date().toISOString()
+                }}));
+              }} />
+            </>}
             <button className="danger" onClick={() => {
               setEditor((previous) => applyCommand(previous, {
                 type: "remove", annotationId: selectedAnnotation.id
               }));
               setSelectedId(undefined);
-            }}>Delete callout</button>
+            }}>Delete {selectedAnnotation.kind==="callout"?"callout":selectedAnnotation.kind==="text"?"text box":"comment"}</button>
           </>}
           <div className="sidebar-footer">
             <strong>Save status</strong>
@@ -601,10 +721,16 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         </aside>
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
+        source={session.source} annotations={editor.annotations} name={session.name}
+        onNativePrint={onNativePrint}
         onClose={() => setShowPrintPlan(false)} />}
+      {showPageOperations && session && <PageOperationsPanel
+        pdf={session.pdf} source={session.source}
+        annotations={editor.annotations} name={session.name}
+        onClose={()=>setShowPageOperations(false)} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
-      } version="0.0.1" onClose={() => setShowDiagnostics(false)} />}
+      } version="0.1.0" onClose={() => setShowDiagnostics(false)} />}
     </main>
   );
 }

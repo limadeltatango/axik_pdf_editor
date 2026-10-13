@@ -1,0 +1,21 @@
+{
+  "name": "@axik/print-document",
+  "version": "0.1.0-alpha",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@axik/document-core": "workspace:*",
+    "@axik/print-plan": "workspace:*",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

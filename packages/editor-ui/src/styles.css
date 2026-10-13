@@ -210,3 +210,17 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
 }
 .diagnostics-timing-summary code { color: #c6ddf6; overflow-wrap: anywhere; }
 .diagnostics-timing-summary span { color: #b4cae2; white-space: nowrap; }
+
+.print-download-link { background: #276aac; color: #fff; font-weight:600;
+  text-decoration:none; padding:9px 11px; border:1px solid #71a3da;
+  border-radius:6px; font-size:12px; display:inline-block; }
+.print-download-link:hover { background:#347ec6; }
+.markup-number { background:#22364c; border:1px solid #536c86;
+  color:#f1f6fc; border-radius:5px; width:100%; padding:7px 8px; }
+
+.page-operation-list { max-height:380px; overflow-y:auto; border-top:1px solid #516780;
+  border-bottom:1px solid #516780; padding:10px 0; margin:15px 0; }
+.page-operation-row { display:flex;align-items:center;gap:6px;
+  padding:7px 9px; border-bottom:1px solid #304761; }
+.page-operation-row span { flex:1;font-size:12px; }
+.page-operation-row button { min-width:34px; }

@@ -5,6 +5,7 @@ on:
     branches:
       - feat/prototype-alpha-20261013
       - feat/apdf-45-save-workflow
+      - feat/apdf-core-editor-print-text
   workflow_dispatch:
 
 permissions:

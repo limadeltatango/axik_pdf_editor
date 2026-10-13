@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type MouseEvent } from "react";
 import {
-  newCallout, pdfToViewport, transformedRect, viewportToPdf,
-  type Annotation, type CalloutAnnotation, type Matrix, type Point
+  newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Matrix, type Point
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
@@ -10,11 +10,13 @@ export interface PageCanvasProps {
   page: PdfPage | undefined;
   pageIndex: number;
   zoom: number;
-  tool: "select" | "callout";
+  tool: "select" | "callout" | "text" | "note";
   annotations: readonly Annotation[];
   selectedAnnotationId?: string;
   onSelect: (id: string) => void;
   onAddCallout: (annotation: CalloutAnnotation) => void;
+  onAddText: (annotation: TextBoxAnnotation) => void;
+  onAddNote: (annotation: StickyNoteAnnotation) => void;
 }
 
 interface ViewportInfo {
@@ -32,7 +34,7 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 
 export function PageCanvas({
   page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout
+  onSelect, onAddCallout, onAddText, onAddNote
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
@@ -103,19 +105,27 @@ export function PageCanvas({
   }, [page, zoom]);
 
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
-    if (!page || !viewport || tool !== "callout") return;
+    if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const tip = viewportToPdf(viewport.transform, {
       x: event.clientX - bounds.left, y: event.clientY - bounds.top
     });
     const [left = 0, bottom = 0, right = 612, top = 792] = page.view;
     try {
-      onAddCallout(newCallout({
-        id: crypto.randomUUID(),
-        pageIndex,
-        tip,
-        pageBounds: { x: left, y: bottom, width: right - left, height: top - bottom }
-      }));
+      const pageBounds={ x: left, y: bottom, width: right - left, height: top - bottom };
+      if(tool === "callout"){
+        onAddCallout(newCallout({
+          id: crypto.randomUUID(),pageIndex,tip,pageBounds
+        }));
+      }else if(tool==="text"){
+        onAddText(newTextBox({
+          id: crypto.randomUUID(),pageIndex,location:tip,pageBounds
+        }));
+      }else{
+        onAddNote(newStickyNote({
+          id:crypto.randomUUID(),pageIndex,position:tip
+        }));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cannot place callout.");
     }
@@ -135,11 +145,32 @@ export function PageCanvas({
           height={viewport.height}
           viewBox={"0 0 " + viewport.width + " " + viewport.height}
           onClick={handlePageClick}
-          style={{ cursor: tool === "callout" ? "crosshair" : "default" }}
+          style={{ cursor: tool !== "select" ? "crosshair" : "default" }}
           aria-label="Page annotation overlay"
         >
           {annotations.filter((annotation) => annotation.pageIndex === pageIndex).map((annotation) => {
-            if (annotation.kind !== "callout") {
+            if (annotation.kind === "text") {
+              const rect = transformedRect(viewport.transform, annotation.box);
+              const selected = selectedAnnotationId === annotation.id;
+              return (
+                <g key={annotation.id}
+                  onClick={event => {event.stopPropagation();onSelect(annotation.id);}}
+                  className="annotation-mark">
+                  <rect x={rect.x} y={rect.y}
+                    width={rect.width} height={rect.height}
+                    fill="transparent"
+                    stroke={selected ? "#187aff" : "#95a2b1"}
+                    strokeDasharray="4 3" strokeWidth={selected ? 2 : 1} />
+                  <text x={rect.x+5} y={rect.y+Math.min(18,rect.height-4)}
+                    fill={annotation.style.stroke}
+                    fontSize={annotation.style.fontSize*zoom}
+                    pointerEvents="none">
+                    {annotation.text.slice(0,60)}
+                  </text>
+                </g>
+              );
+            }
+            if (annotation.kind === "note") {
               const point = pdfToViewport(viewport.transform, annotation.position);
               return <g key={annotation.id}
                 onClick={(event) => { event.stopPropagation(); onSelect(annotation.id); }}
