@@ -181,7 +181,15 @@ pub fn save_native_pdf(
     if backup.exists() {
         return Err("A unique backup could not be selected.".into());
     }
-    atomic_replace_with_backup(&entry.path,temp.path(),&backup)?;
+    // ReplaceFileW requires exclusive access to the replacement. Close the
+    // NamedTempFile handle before invoking Windows' replacement transaction.
+    let (staged_handle, staged_path) = temp.keep()
+        .map_err(|_| "Cannot persist staged replacement before atomic Save.")?;
+    drop(staged_handle);
+    if let Err(reason) = atomic_replace_with_backup(&entry.path,&staged_path,&backup) {
+        let _ = fs::remove_file(&staged_path);
+        return Err(reason);
+    }
     // Windows ReplaceFileW handles the original/replacement/backup transaction.
     // Verify actual output bytes and retain the original in backup on failure.
     let saved = read_pdf(&entry.path)?;
