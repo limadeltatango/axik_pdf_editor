@@ -15,7 +15,7 @@
     "typecheck": "pnpm -r typecheck",
     "build:all": "pnpm build:extension && pnpm build:desktop",
     "test": "tsx --test test/unit/*.test.ts",
-    "test:e2e": "playwright test test/e2e/chromium-extension.spec.ts --workers=1 --reporter=line"
+    "test:e2e": "playwright test test/e2e --workers=1 --reporter=line"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
@@ -27,6 +27,7 @@
     "@axik/print-plan": "workspace:*",
     "@axik/diagnostics": "workspace:*",
     "@axik/pdf-writer": "workspace:*",
-    "@playwright/test": "^1.56.0"
+    "@playwright/test": "^1.56.0",
+    "@axik/recovery": "workspace:*"
   }
 }
