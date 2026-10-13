@@ -8,6 +8,8 @@ export interface AnnotationBase {
   author?: string;
   createdAt: string;
   updatedAt: string;
+  /** Existing native PDF /NM key. Never infer one for a new draft. */
+  sourceName?: string;
 }
 
 export interface AnnotationStyle {
@@ -67,6 +69,13 @@ export function validateAnnotation(value: Annotation): Annotation {
     throw new RangeError("Invalid annotation identity.");
   }
   if (value.author && value.author.length > 200) throw new RangeError("Author too long.");
+  if(value.sourceName !== undefined && (
+    typeof value.sourceName !== "string" ||
+    value.sourceName.length < 1 || value.sourceName.length > 128 ||
+    value.sourceName !== value.id
+  )) {
+    throw new RangeError("Imported annotation identifier must match its PDF /NM name.");
+  }
   if (!Number.isFinite(Date.parse(value.createdAt)) ||
       !Number.isFinite(Date.parse(value.updatedAt))) {
     throw new RangeError("Annotation timestamps must be valid ISO dates.");
