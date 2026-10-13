@@ -189,7 +189,8 @@ export class DiagnosticRecorder {
     let stored: StoredDiagnosticSession[] = [];
     try {
       stored = await readSessions();
-      this.storageWorking = true;
+      // A successful read does not prove the most recent write was durable.
+      // Preserve a prior write failure in the exported health indicator.
     } catch {
       this.storageWorking = false;
     }
