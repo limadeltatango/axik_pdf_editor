@@ -13,7 +13,8 @@
   "dependencies": {
     "@axik/editor-ui": "workspace:*",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "@axik/diagnostics": "workspace:*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0",
