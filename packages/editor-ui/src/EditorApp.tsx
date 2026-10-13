@@ -25,6 +25,8 @@ export interface EditorAppProps {
   environment: "desktop" | "extension";
   /** Optional user-approved file supplied by the Chromium link acquisition UI. */
   requestedFile?: File;
+  /** Desktop-only, privileged, explicit user-action print file handoff. */
+  onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
 }
 
 interface Session {
@@ -53,7 +55,7 @@ function downloadBlob(name: string, content: Uint8Array): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function EditorApp({ environment, requestedFile }: EditorAppProps) {
+export function EditorApp({ environment, requestedFile, onNativePrint }: EditorAppProps) {
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
@@ -635,6 +637,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
+        onNativePrint={onNativePrint}
         onClose={() => setShowPrintPlan(false)} />}
       {showPageOperations && session && <PageOperationsPanel
         pdf={session.pdf} source={session.source}
