@@ -260,17 +260,14 @@ export function EditorApp({
     }
   }, [requestedFile, openFile]);
 
+  /** The normal Open button must always use the proven file-input path on
+   * Desktop. Native Open is optional and only grants in-place Save permission.
+   *
+   * Chromium keeps its user-gesture-gated writable picker where supported.
+   */
   async function choosePdf() {
-    if(onNativeOpen){
-      try {
-        const opened=await onNativeOpen();
-        if(!opened)return;
-        const copy=new Uint8Array(opened.bytes.byteLength);
-        copy.set(opened.bytes);
-        await openFile(new File([copy.buffer],opened.name,{type:"application/pdf"}),undefined,opened.token);
-      }catch(reason){
-        setError("Native Open failed: "+pdfError(reason));
-      }
+    if (environment === "desktop") {
+      fileInputRef.current?.click();
       return;
     }
     if (!supportsEditablePicker()) {
@@ -282,7 +279,32 @@ export function EditorApp({
       await openFile(selected.file, selected.handle);
     } catch (reason) {
       if (reason instanceof Error && reason.name === "AbortError") return;
+      diagnostics.recordError("document", "PDF_OPEN_FAILED", reason);
       setError("Could not open selected PDF: " + pdfError(reason));
+      // The ordinary input remains available even if the browser writable
+      // picker fails or isn't supported on this version of Chromium.
+    }
+  }
+
+  /** Optional Windows-native selection for people who need Save/Overwrite.
+   * Never replace the normal Open PDF button with this path.
+   */
+  async function chooseNativePdfForSave() {
+    if (!onNativeOpen || documentBusy) return;
+    try {
+      const opened = await onNativeOpen();
+      if (!opened) return;
+      const copy = new Uint8Array(opened.bytes.byteLength);
+      copy.set(opened.bytes);
+      await openFile(
+        new File([copy.buffer], opened.name, { type: "application/pdf" }),
+        undefined,
+        opened.token
+      );
+    } catch (reason) {
+      diagnostics.recordError("document", "PDF_OPEN_FAILED", reason);
+      setError("Windows Open for Save failed: " + pdfError(reason) +
+        ". Use Open PDF instead to load a read-only original, then Quick Export or Save As.");
     }
   }
 
@@ -604,9 +626,16 @@ export function EditorApp({
           {session?.name ?? "No document open"}
         </div>
         <div className="topbar-actions">
-          <button onClick={() => void choosePdf()} disabled={loading}>
-            {loading ? "Opening…" : "Open PDF"}
+          <button onClick={() => void choosePdf()} disabled={documentBusy}>
+            {documentBusy ? "Opening…" : "Open PDF"}
           </button>
+          {onNativeOpen && (
+            <button onClick={() => void chooseNativePdfForSave()}
+              disabled={documentBusy || exporting}
+              title="Optional Windows file dialog: grants in-place Save permission. If it fails, use Open PDF and Quick Export or Save As.">
+              Open for Save…
+            </button>
+          )}
           <button className="primary"
             onClick={() => dirty ? void exportEdited() : exportOriginal()}
             disabled={!session || exporting || documentBusy}
@@ -684,9 +713,10 @@ export function EditorApp({
             <h1>Your documents, without the overhead.</h1>
             <p>Open a PDF to view it, navigate pages and try the local callout tool.</p>
             <button className="primary" onClick={() => void choosePdf()}>Choose a PDF</button>
-            <p className="muted">Or drag a PDF onto this window. Files are processed locally.
-              When supported, choosing a file directly enables Save with a verified separate backup.
-              Dragged and downloaded files still support Quick Export and Save As.</p>
+            <p className="muted">Open PDF uses the regular file picker and leaves the original untouched.
+              Use Open for Save (Windows desktop) only when you specifically need
+              in-place Save with an automatic backup. Quick Export and Save As
+              remain available for ordinary files.</p>
             <p className="warning-note">This is an early foundation. Editing, intelligent printing, signing and
               secure redaction are not yet complete and must not be relied on for production work.</p>
           </section>}

@@ -8,6 +8,7 @@ on:
       - feat/apdf-core-editor-print-text
       - feat/apdf-19-printer-capabilities
       - feat/apdf-22-reopen-edit-annotations
+      - fix/apdf-desktop-open-pdf-hotfix
   workflow_dispatch:
 
 permissions:
@@ -43,6 +44,25 @@ jobs:
         run: node tools/check-extension-package.mjs
       - name: Install Chromium for browser integration test
         run: pnpm exec playwright install --with-deps chromium
+      - name: Regression test Windows desktop Open PDF fallback
+        run: |
+          set -eu
+          pnpm --filter @axik/desktop dev:web >/tmp/axik-desktop-vite.log 2>&1 &
+          VITE_PID=$!
+          trap 'kill "$VITE_PID" || true' EXIT
+          READY=0
+          for attempt in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:1420/ >/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            cat /tmp/axik-desktop-vite.log
+            exit 1
+          fi
+          pnpm exec playwright test test/desktop-web/desktop-open.spec.ts --workers=1 --reporter=line
       - name: Test extension in actual Chromium
         run: pnpm test:e2e
       - name: Package prototype
