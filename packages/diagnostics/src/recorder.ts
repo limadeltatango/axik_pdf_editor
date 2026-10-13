@@ -56,7 +56,7 @@ function validEvent(value: unknown): DiagnosticEvent | undefined {
 export interface RecentDiagnostics {
   sessions: StoredDiagnosticSession[];
   eventCount: number;
-  localStorageAvailable: boolean;
+  persistentStorageAvailable: boolean;
 }
 
 /**
@@ -231,7 +231,7 @@ export class DiagnosticRecorder {
     return {
       sessions,
       eventCount: sessions.reduce((count, session) => count + session.events.length, 0),
-      localStorageAvailable: this.storageWorking
+      persistentStorageAvailable: this.storageWorking
     };
   }
 
