@@ -13,7 +13,7 @@ import { normalizeForFixedStockPrinting, type NormalizedPrintResult,
   PrintPreparationError, planPrintableDocument } from "@axik/print-document";
 import { type PrintPlan, type PlanOptions } from "@axik/print-plan";
 import { type Annotation } from "@axik/document-core";
-import { exportEditedPdf } from "@axik/pdf-writer";
+import { exportEditedPdf,planAnnotationEdits } from "@axik/pdf-writer";
 import { startOpenPdf } from "./pdf";
 
 const MAX_RASTER_PAGES=75;
@@ -56,12 +56,16 @@ export async function preparePrintDocument(
   settings:Omit<PlanOptions,"pages">,
   options:{
     rasterDpi?:number;
+    importedAnnotations?:readonly Annotation[];
     onProgress?:(current:number,total:number)=>void;
   }={}
 ):Promise<PreparedPrintDocument>{
   if(!original.byteLength)throw new Error("No PDF was selected.");
-  const input=annotations.length
-    ? (await exportEditedPdf(original,annotations)).bytes
+  const mutations=planAnnotationEdits(options.importedAnnotations??[],annotations);
+  const input=mutations.changes.length || mutations.removeNames.length
+    ? (await exportEditedPdf(original,mutations.changes,{
+        removeNames:mutations.removeNames
+      })).bytes
     : original;
   try{
     const result=await normalizeForFixedStockPrinting(input,settings);

@@ -8,7 +8,7 @@ import {
   type DraftRecord
 } from "@axik/recovery";
 import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
-import { exportEditedPdf } from "@axik/pdf-writer";
+import { exportEditedPdf,readEditableAnnotations,planAnnotationEdits } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
@@ -44,6 +44,8 @@ interface Session {
   fingerprint?: string;
   writableHandle?: ExplicitFileHandle;
   nativeToken?: string;
+  /** Exact Axik-owned objects decoded from the source PDF, before user edits. */
+  importedAnnotations?: readonly Annotation[];
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
@@ -80,6 +82,7 @@ export function EditorApp({
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
   const [loading, setLoading] = useState(false);
+  const [importingAnnotations,setImportingAnnotations]=useState(false);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
@@ -199,13 +202,29 @@ export function EditorApp({
         fileSizeBucketMiB: sizeBucket, pageCount: pdf.numPages
       });
       setSession({ name: file.name, source, pdf, writableHandle, nativeToken });
+      setImportingAnnotations(true);
+      void readEditableAnnotations(source).then(imported=>{
+        if(generation !== generationRef.current)return;
+        setSession(previous=>previous?.pdf===pdf
+          ? {...previous,importedAnnotations:imported}:previous);
+        setEditor(initialEditorState(imported));
+      }).catch(reason=>{
+        if(generation!==generationRef.current)return;
+        // Rendering is still possible even if native annotation import fails.
+        diagnostics.recordError("annotation","ANNOTATION_IMPORT_FAILED",reason);
+        setSession(previous=>previous?.pdf===pdf
+          ? {...previous,importedAnnotations:[]}:previous);
+        setNotice("PDF opened. Some existing annotations could not be made editable; the source remains unchanged.");
+      }).finally(()=>{
+        if(generation===generationRef.current)setImportingAnnotations(false);
+      });
       setPageNumber(1);
       setZoom(1);
       setTool("select");
       setSelectedId(undefined);
       setEditor(initialEditorState());
       setShowPrintPlan(false);
-      setNotice("PDF opened. Markup is an in-session draft; edited PDF export is not implemented yet.");
+      setNotice("PDF opened. New and existing Axik markups can be exported to a new PDF. Existing underlying page text is not yet directly editable.");
       // Fingerprinting and draft lookup follow after the document is usable.
       void documentFingerprint(source).then(async (fingerprint) => {
         if (generation !== generationRef.current) return;
@@ -287,7 +306,8 @@ export function EditorApp({
   function restoreDraft() {
     if (!recovery) return;
     try {
-      setEditor(initialEditorState(recovery.annotations));
+      setEditor({...initialEditorState(recovery.annotations),
+        revision:Math.max(1,recovery.revision)});
       diagnostics.record("annotation", "ANNOTATION_RESTORED", "info", {
         annotationCount: recovery.annotations.length
       });
@@ -337,14 +357,24 @@ export function EditorApp({
   const selectedAnnotation: Annotation | undefined =
     editor.annotations.find((annotation) => annotation.id === selectedId);
   const dirty = hasEdits(editor);
+  const documentBusy=loading || importingAnnotations;
+
+  async function exportCurrentChanges(
+    active:Session, changes:readonly Annotation[]
+  ){
+    const plan=planAnnotationEdits(active.importedAnnotations??[],changes);
+    return await exportEditedPdf(active.source,plan.changes,{
+      removeNames:plan.removeNames
+    });
+  }
 
   async function exportEdited() {
-    if (!session || !dirty || exporting) return;
+    if (!session || !dirty || exporting || documentBusy) return;
     setExporting(true);
     setError(undefined);
     const started = performance.now();
     try {
-      const result = await exportEditedPdf(session.source, editor.annotations);
+      const result = await exportCurrentChanges(session,editor.annotations);
       const filename = session.name.replace(/\.pdf$/i, "") + "-axik-edited.pdf";
       downloadBlob(filename, result.bytes);
       diagnostics.record("document", "PDF_EXPORT_OK", "info", {
@@ -385,8 +415,12 @@ export function EditorApp({
     fingerprint: string, pdf: PdfDocument, nativeToken?: string
   ) {
     const prior = session?.fingerprint;
-    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf, nativeToken });
-    setEditor(initialEditorState());
+    const imported=await readEditableAnnotations(bytes).catch(()=>[]);
+    setSession({
+      source:bytes,name,writableHandle:handle,
+      fingerprint,pdf,nativeToken,importedAnnotations:imported
+    });
+    setEditor(initialEditorState(imported));
     setPageNumber(1);
     setSelectedId(undefined);
     setTool("select");
@@ -397,7 +431,7 @@ export function EditorApp({
   }
 
   async function saveAsFile() {
-    if (!session || exporting || (!supportsSavePicker() && !onNativeSaveAs)) return;
+    if (!session || exporting || documentBusy || (!supportsSavePicker() && !onNativeSaveAs)) return;
     if(onNativeSaveAs){
       setExporting(true);
       setError(undefined);
@@ -442,7 +476,7 @@ export function EditorApp({
     diagnostics.record("document", "PDF_SAVE_AS_START");
     let preview: PdfDocument | undefined;
     try {
-      const result = await exportEditedPdf(session.source, editor.annotations);
+      const result = await exportCurrentChanges(session,editor.annotations);
       preview = await preparePdfForSave(result.bytes);
       const fingerprint = await safeSaveAs(target, result.bytes, session.writableHandle);
       await finishSavedPdf(result.bytes, target.name, target, fingerprint, preview);
@@ -464,7 +498,7 @@ export function EditorApp({
   }
 
   async function saveCurrentFile() {
-    if(!session || !session.fingerprint || !dirty || exporting)return;
+    if(!session || !session.fingerprint || !dirty || exporting || documentBusy)return;
     if(session.nativeToken && onNativeSave){
       if(!window.confirm(
         "SAVE WILL OVERWRITE THIS PDF. Axik will preserve an automatic "+
@@ -521,7 +555,7 @@ export function EditorApp({
     let preview: PdfDocument | undefined;
     try {
       const original = session;
-      const result = await exportEditedPdf(original.source, editor.annotations);
+      const result = await exportCurrentChanges(original,editor.annotations);
       preview = await preparePdfForSave(result.bytes);
       const fingerprint = await safeOverwriteOriginal({
         originalHandle: original.writableHandle!, backupHandle: backup,
@@ -575,13 +609,13 @@ export function EditorApp({
           </button>
           <button className="primary"
             onClick={() => dirty ? void exportEdited() : exportOriginal()}
-            disabled={!session || exporting}
+            disabled={!session || exporting || documentBusy}
             title="Quick Export downloads a separate PDF copy; it never overwrites the source">
             {exporting ? "Exporting…" : "Quick Export"}
           </button>
           <button
             onClick={() => void saveAsFile()}
-            disabled={!session || exporting || !(onNativeSaveAs || supportsSavePicker())}
+            disabled={!session || exporting || documentBusy || !(onNativeSaveAs || supportsSavePicker())}
             title={onNativeSaveAs || supportsSavePicker() ?
               "Save as a new PDF (never overwrite a nonempty destination)" :
               "Save As unavailable in this environment; use Quick Export"}>
@@ -590,7 +624,7 @@ export function EditorApp({
           <button
             onClick={() => void saveCurrentFile()}
             disabled={!(session?.writableHandle || (session?.nativeToken && onNativeSave)) ||
-              !session?.fingerprint || !dirty || exporting}
+              !session?.fingerprint || !dirty || exporting || documentBusy}
             title={session?.nativeToken && onNativeSave ?
               "Native Save uses an automatic backup and Windows atomic replacement" :
               session?.writableHandle ?
@@ -601,8 +635,8 @@ export function EditorApp({
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
             setShowPrintPlan(true);
-          }} disabled={!session}>Print</button>
-          <button onClick={()=>setShowPageOperations(true)} disabled={!session}>
+          }} disabled={!session || documentBusy}>Print</button>
+          <button onClick={()=>setShowPageOperations(true)} disabled={!session || documentBusy}>
             Pages
           </button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
@@ -610,21 +644,21 @@ export function EditorApp({
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
       </header>
       <div className="toolstrip" role="toolbar" aria-label="PDF editing tools">
-        <button aria-pressed={tool === "select"} disabled={!session}
+        <button aria-pressed={tool === "select"} disabled={!session || documentBusy}
           className={tool === "select" ? "active" : ""}
           onClick={() => setTool("select")}>Select</button>
-        <button aria-pressed={tool === "callout"} disabled={!session}
+        <button aria-pressed={tool === "callout"} disabled={!session || documentBusy}
           className={tool === "callout" ? "active" : ""}
           onClick={() => setTool("callout")}>Callout ↗</button>
-        <button aria-pressed={tool === "text"} disabled={!session}
+        <button aria-pressed={tool === "text"} disabled={!session || documentBusy}
           className={tool === "text" ? "active" : ""}
           onClick={() => setTool("text")}>Add Text</button>
-        <button aria-pressed={tool === "note"} disabled={!session}
+        <button aria-pressed={tool === "note"} disabled={!session || documentBusy}
           className={tool === "note" ? "active" : ""}
           onClick={() => setTool("note")}>Comment</button>
         <span className="separator" />
-        <button disabled={!editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
-        <button disabled={!editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
+        <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
+        <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
         <span className="separator" />
         <button disabled={!session} onClick={() => setPageNumber((n) => Math.max(1, n - 1))}>◀</button>
         <span className="page-counter">Page {session ? pageNumber : "—"} / {session?.pdf.numPages ?? "—"}</span>
@@ -640,7 +674,7 @@ export function EditorApp({
       {error && <div className="message error" role="alert">{error} <button onClick={() => setError(undefined)}>Dismiss</button></div>}
       {recovery && <div className="message recover" role="status">
         Found a local draft of this document from {new Date(recovery.savedAt).toLocaleString()}.
-        <button onClick={restoreDraft}>Restore annotations</button>
+        <button disabled={importingAnnotations} onClick={restoreDraft}>Restore annotations</button>
         <button onClick={discardRecoveredDraft}>Discard draft</button>
       </div>}
       {notice && <div className="message hint" role="status">{notice} <button onClick={() => setNotice(undefined)}>×</button></div>}
@@ -690,12 +724,12 @@ export function EditorApp({
             <label className="editor-label" htmlFor="callout-text">
               {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
             </label>
-            <textarea id="callout-text" value={selectedAnnotation.text}
+            <textarea id="callout-text" disabled={documentBusy} value={selectedAnnotation.text}
               onChange={(event) => changeMarkupText(selectedAnnotation, event.target.value)}
               rows={5} maxLength={20000} />
             {selectedAnnotation.kind !== "note" && <>
             <label className="editor-label" htmlFor="markup-font-size">Font size (points)</label>
-            <input id="markup-font-size" className="markup-number"
+            <input id="markup-font-size" className="markup-number" disabled={documentBusy}
               type="number" min={4} max={200}
               value={selectedAnnotation.style.fontSize}
               onChange={event=>{
@@ -708,7 +742,7 @@ export function EditorApp({
                 }}));
               }} />
             </>}
-            <button className="danger" onClick={() => {
+            <button className="danger" disabled={documentBusy} onClick={() => {
               setEditor((previous) => applyCommand(previous, {
                 type: "remove", annotationId: selectedAnnotation.id
               }));
@@ -727,12 +761,14 @@ export function EditorApp({
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
+        importedAnnotations={session.importedAnnotations}
         onNativePrint={onNativePrint}
         onPrinterList={onPrinterList} onPrinterCapabilities={onPrinterCapabilities}
         onClose={() => setShowPrintPlan(false)} />}
       {showPageOperations && session && <PageOperationsPanel
         pdf={session.pdf} source={session.source}
-        annotations={editor.annotations} name={session.name}
+        annotations={editor.annotations}
+        importedAnnotations={session.importedAnnotations} name={session.name}
         onClose={()=>setShowPageOperations(false)} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"

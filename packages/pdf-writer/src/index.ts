@@ -1,6 +1,6 @@
 import {
-  PDFArray, PDFDocument, PDFHexString, PDFName, PDFString,
-  StandardFonts, type PDFFont
+  PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString,
+  StandardFonts, type PDFFont, type PDFPage, type PDFRef
 } from "pdf-lib";
 import {
   calloutToStandardPayload, validateAnnotation,
@@ -168,6 +168,80 @@ function isoPdfDate(date: Date): string {
     pad(date.getUTCSeconds()) + "Z";
 }
 
+
+function nativeName(dict:PDFDict):string|undefined{
+  const obj=dict.lookup(PDFName.of("NM"));
+  return obj instanceof PDFHexString || obj instanceof PDFString
+    ? obj.decodeText() : undefined;
+}
+function nativeAuthor(dict:PDFDict):string|undefined{
+  const obj=dict.lookup(PDFName.of("T"));
+  return obj instanceof PDFHexString || obj instanceof PDFString
+    ? obj.decodeText() : undefined;
+}
+function annotationList(page:PDFPage,doc:PDFDocument):PDFArray{
+  const raw=page.node.get(PDFName.of("Annots"));
+  if(raw)return doc.context.lookup(raw,PDFArray);
+  const array=doc.context.obj([]) as PDFArray;
+  page.node.set(PDFName.of("Annots"),array);
+  return array;
+}
+function addOrReplace(
+  doc:PDFDocument,page:PDFPage,annotation:Annotation,ref:PDFRef
+):void{
+  const array=annotationList(page,doc);
+  const matches:number[]=[];
+  for(let i=0;i<array.size();i++){
+    let dict:PDFDict;
+    try{dict=doc.context.lookup(array.get(i),PDFDict)}catch{continue}
+    if(nativeName(dict)===(annotation.sourceName??annotation.id)){
+      matches.push(i);
+      if(annotation.sourceName && nativeAuthor(dict)!=="Axik PDF"){
+        throw new Error("Cannot change an annotation not owned by Axik PDF.");
+      }
+    }
+  }
+  if(!annotation.sourceName){
+    if(matches.length)throw new Error("A PDF annotation already uses this identifier.");
+    array.push(ref);
+    return;
+  }
+  if(matches.length!==1){
+    throw new Error("Existing annotation was not uniquely found. Original PDF remains unchanged.");
+  }
+  array.set(matches[0]!,ref);
+}
+function removeExisting(doc:PDFDocument,names:readonly string[]):void{
+  const unique=new Set(names);
+  if(unique.size!==names.length || names.length>1000){
+    throw new RangeError("Invalid native annotation deletion list.");
+  }
+  for(const name of unique){
+    if(typeof name!=="string" || !name.length || name.length>128){
+      throw new RangeError("Unsafe native annotation reference.");
+    }
+    let found=0;
+    for(const page of doc.getPages()){
+      const raw=page.node.get(PDFName.of("Annots"));
+      if(!raw)continue;
+      const array=doc.context.lookup(raw,PDFArray);
+      for(let i=array.size()-1;i>=0;i--){
+        const dict=doc.context.lookup(array.get(i),PDFDict);
+        if(nativeName(dict)===name){
+          if(nativeAuthor(dict)!=="Axik PDF"){
+            throw new Error("Cannot delete a non-Axik PDF annotation.");
+          }
+          array.remove(i);
+          found++;
+        }
+      }
+    }
+    if(found!==1){
+      throw new Error("Existing annotation to remove was missing or duplicated.");
+    }
+  }
+}
+
 function addCallout(doc: PDFDocument, font: PDFFont, annotation: CalloutAnnotation): void {
   validateAnnotation(annotation);
   if (annotation.pageIndex >= doc.getPageCount()) throw new RangeError("Annotation page does not exist.");
@@ -224,13 +298,7 @@ function addCallout(doc: PDFDocument, font: PDFFont, annotation: CalloutAnnotati
     AP: { N: appearanceRef }
   });
   const reference = context.register(state);
-  const existingEntry = page.node.get(PDFName.of("Annots"));
-  const existing = existingEntry ? context.lookup(existingEntry, PDFArray) : undefined;
-  if (existing) {
-    existing.push(reference);
-  } else {
-    page.node.set(PDFName.of("Annots"), context.obj([reference]));
-  }
+  addOrReplace(doc,page,annotation,reference);
 }
 
 
@@ -276,10 +344,7 @@ function addFreeText(doc:PDFDocument,font:PDFFont,a:TextBoxAnnotation):void{
     AP:{N:appearance}
   });
   const ref=context.register(dict);
-  const raw=page.node.get(PDFName.of("Annots"));
-  const existing=raw?context.lookup(raw,PDFArray):undefined;
-  if(existing)existing.push(ref);
-  else page.node.set(PDFName.of("Annots"),context.obj([ref]));
+  addOrReplace(doc,page,a,ref);
 }
 
 
@@ -312,10 +377,7 @@ function addStickyNote(doc:PDFDocument,font:PDFFont,n:StickyNoteAnnotation):void
     AP:{N:appearance}
   });
   const ref=c.register(state);
-  const raw=page.node.get(PDFName.of("Annots"));
-  const existing=raw?c.lookup(raw,PDFArray):undefined;
-  if(existing)existing.push(ref);
-  else page.node.set(PDFName.of("Annots"),c.obj([ref]));
+  addOrReplace(doc,page,n,ref);
 }
 
 /**
@@ -327,7 +389,8 @@ function addStickyNote(doc:PDFDocument,font:PDFFont,n:StickyNoteAnnotation):void
  */
 export async function exportEditedPdf(
   original: Uint8Array,
-  annotations: readonly Annotation[]
+  annotations: readonly Annotation[],
+  options: {removeNames?: readonly string[]} = {}
 ): Promise<PdfExportResult> {
   if (!original.byteLength || original.byteLength > MAX_INPUT_BYTES) {
     throw new RangeError("The alpha writer supports source PDFs up to 100 MiB.");
@@ -345,6 +408,7 @@ export async function exportEditedPdf(
     updateMetadata: false,
     ignoreEncryption: false
   });
+  if(options.removeNames?.length)removeExisting(doc,options.removeNames);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const warnings: string[] = [];
   for (const annotation of supported) {
@@ -378,3 +442,7 @@ export async function exportEditedPdf(
     warnings: [...new Set(warnings)]
   };
 }
+
+export {readEditableAnnotations} from "./read-annotations";
+export {planAnnotationEdits} from "./diff-annotations";
+export type {PlannedAnnotationEdits} from "./diff-annotations";
