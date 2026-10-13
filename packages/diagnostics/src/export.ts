@@ -97,10 +97,12 @@ export async function createSupportBundle(
     .flatMap((session) => session.events)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) ||
       a.sessionId.localeCompare(b.sessionId) || a.sequence - b.sequence);
+  const safeVersion = /^[0-9a-zA-Z._-]{1,64}$/.test(appVersion)
+    ? appVersion : "unknown";
   const manifest: ExportManifest = {
     format: "axik-pdf-diagnostics", schema: 1,
     createdAt: now.toISOString(), app: "Axik PDF Editor",
-    runtime, appVersion, sessionCount: recent.sessions.length,
+    runtime, appVersion: safeVersion, sessionCount: recent.sessions.length,
     eventCount: events.length, collectionEnabled: diagnostics.enabled,
     persistentStorageAvailable: recent.localStorageAvailable,
     includesEnvironment: includeEnvironment,
