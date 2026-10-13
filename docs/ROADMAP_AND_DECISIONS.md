@@ -153,3 +153,14 @@ Don't launch Actions or invoke Weave as part of issue or document creation. CI r
 ## 12. What was explicitly not done
 
 No Axik AI Weave run, local model inference, Codex job, GitHub Actions setup/run, AI reviewer, source implementation, build, installer creation, external application deployment or printer test is authorized by producing this specification. These are next-stage activities only after the owner approves scope and an execution path.
+
+## Save and revision workflow sequencing (2026-10-13)
+
+The owner manually confirmed that the Windows alpha could export a marked-up PDF and reopen the edited copy with the callout intact. Quick Export should remain immediate and never overwrite its input.
+
+The next three general-purpose editor priorities are:
+1. **APDF-45:** separate **Save** (deliberate overwrite with recoverable backup, conflict detection, written-output validation), **Save As** (new chosen path), and **Quick Export** (new copy without switching the active file);
+2. **APDF-18/19/20:** actual Windows mixed-orientation printing, real printer capability negotiation and physical acceptance;
+3. **APDF-46/47:** adding new native PDF text and eventually modifying existing page text with real content-stream/font fidelity. A cosmetic cover-up is not true text replacement.
+
+**APDF-44 — Revision Manager** is documented separately in [REVISION_MANAGER.md](REVISION_MANAGER.md), with immutable baseline PDF versions, proposed changes, review packages, recorded decisions and approved-only incorporation. It must not take precedence over Save/Overwrite, printing or text editing. An approved PDF revision does **not** modify CAD/BIM design source files by itself.
