@@ -506,7 +506,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
             setShowPrintPlan(true);
-          }} disabled={!session}>Layout preview</button>
+          }} disabled={!session}>Print</button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
@@ -622,6 +622,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         </aside>
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
+        source={session.source} annotations={editor.annotations} name={session.name}
         onClose={() => setShowPrintPlan(false)} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
