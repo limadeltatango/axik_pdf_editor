@@ -27,6 +27,10 @@ export interface EditorAppProps {
   requestedFile?: File;
   /** Desktop-only, privileged, explicit user-action print file handoff. */
   onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
+  onNativeOpen?: ()=>Promise<{name:string;token:string;bytes:Uint8Array}|null>;
+  onNativeSave?: (token:string,bytes:Uint8Array)=>Promise<{name:string;token:string;backupName?:string|null}>;
+  onNativeSaveAs?: (bytes:Uint8Array,suggestedName:string)=>
+    Promise<{name:string;token:string;backupName?:string|null}|null>;
 }
 
 interface Session {
@@ -35,6 +39,7 @@ interface Session {
   source: Uint8Array;
   fingerprint?: string;
   writableHandle?: ExplicitFileHandle;
+  nativeToken?: string;
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
@@ -55,7 +60,9 @@ function downloadBlob(name: string, content: Uint8Array): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function EditorApp({ environment, requestedFile, onNativePrint }: EditorAppProps) {
+export function EditorApp({
+  environment,requestedFile,onNativePrint,onNativeOpen,onNativeSave,onNativeSaveAs
+}: EditorAppProps) {
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
@@ -139,7 +146,7 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
     return () => window.removeEventListener("beforeunload", warnUnsaved);
   }, [editor]);
 
-  const openFile = useCallback(async (file: File, writableHandle?: ExplicitFileHandle) => {
+  const openFile = useCallback(async (file: File, writableHandle?: ExplicitFileHandle, nativeToken?: string) => {
     if (session && hasEdits(editor)) {
       if (!window.confirm("Changes are draft-only and not embedded in the PDF. Store the local draft and open another file?")) {
         return;
@@ -186,7 +193,7 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
         durationMs: performance.now() - openStart,
         fileSizeBucketMiB: sizeBucket, pageCount: pdf.numPages
       });
-      setSession({ name: file.name, source, pdf, writableHandle });
+      setSession({ name: file.name, source, pdf, writableHandle, nativeToken });
       setPageNumber(1);
       setZoom(1);
       setTool("select");
@@ -230,6 +237,18 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
   }, [requestedFile, openFile]);
 
   async function choosePdf() {
+    if(onNativeOpen){
+      try {
+        const opened=await onNativeOpen();
+        if(!opened)return;
+        const copy=new Uint8Array(opened.bytes.byteLength);
+        copy.set(opened.bytes);
+        await openFile(new File([copy.buffer],opened.name,{type:"application/pdf"}),undefined,opened.token);
+      }catch(reason){
+        setError("Native Open failed: "+pdfError(reason));
+      }
+      return;
+    }
     if (!supportsEditablePicker()) {
       fileInputRef.current?.click();
       return;
@@ -357,11 +376,11 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
   }
 
   async function finishSavedPdf(
-    bytes: Uint8Array, name: string, handle: ExplicitFileHandle,
-    fingerprint: string, pdf: PdfDocument
+    bytes: Uint8Array, name: string, handle: ExplicitFileHandle | undefined,
+    fingerprint: string, pdf: PdfDocument, nativeToken?: string
   ) {
     const prior = session?.fingerprint;
-    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf });
+    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf, nativeToken });
     setEditor(initialEditorState());
     setPageNumber(1);
     setSelectedId(undefined);
