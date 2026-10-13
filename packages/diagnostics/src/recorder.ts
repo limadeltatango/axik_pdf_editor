@@ -238,13 +238,22 @@ export class DiagnosticRecorder {
       this.writeTimer = undefined;
     }
     await this.writeChain;
-    await clearSessions();
+    let clearFailure: unknown;
+    try {
+      await clearSessions();
+    } catch (reason) {
+      clearFailure = reason;
+      this.storageWorking = false;
+    }
+    // Clearing the active in-memory buffer must still work if IndexedDB is
+    // blocked, unavailable or over quota.
     this.events = [];
     this.sessionId = randomId();
     this.startedAt = new Date().toISOString();
     this.nextSequence = 0;
     this.dirty = false;
-    this.storageWorking = true;
+    if (!clearFailure) this.storageWorking = true;
+    if (clearFailure) throw clearFailure;
   }
 }
 
