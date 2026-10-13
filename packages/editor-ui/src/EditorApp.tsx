@@ -357,6 +357,7 @@ export function EditorApp({
   const selectedAnnotation: Annotation | undefined =
     editor.annotations.find((annotation) => annotation.id === selectedId);
   const dirty = hasEdits(editor);
+  const documentBusy=loading || importingAnnotations;
 
   async function exportCurrentChanges(
     active:Session, changes:readonly Annotation[]
@@ -368,7 +369,7 @@ export function EditorApp({
   }
 
   async function exportEdited() {
-    if (!session || !dirty || exporting) return;
+    if (!session || !dirty || exporting || documentBusy) return;
     setExporting(true);
     setError(undefined);
     const started = performance.now();
@@ -430,7 +431,7 @@ export function EditorApp({
   }
 
   async function saveAsFile() {
-    if (!session || exporting || (!supportsSavePicker() && !onNativeSaveAs)) return;
+    if (!session || exporting || documentBusy || (!supportsSavePicker() && !onNativeSaveAs)) return;
     if(onNativeSaveAs){
       setExporting(true);
       setError(undefined);
@@ -497,7 +498,7 @@ export function EditorApp({
   }
 
   async function saveCurrentFile() {
-    if(!session || !session.fingerprint || !dirty || exporting)return;
+    if(!session || !session.fingerprint || !dirty || exporting || documentBusy)return;
     if(session.nativeToken && onNativeSave){
       if(!window.confirm(
         "SAVE WILL OVERWRITE THIS PDF. Axik will preserve an automatic "+
@@ -608,13 +609,13 @@ export function EditorApp({
           </button>
           <button className="primary"
             onClick={() => dirty ? void exportEdited() : exportOriginal()}
-            disabled={!session || exporting}
+            disabled={!session || exporting || documentBusy}
             title="Quick Export downloads a separate PDF copy; it never overwrites the source">
             {exporting ? "Exporting…" : "Quick Export"}
           </button>
           <button
             onClick={() => void saveAsFile()}
-            disabled={!session || exporting || !(onNativeSaveAs || supportsSavePicker())}
+            disabled={!session || exporting || documentBusy || !(onNativeSaveAs || supportsSavePicker())}
             title={onNativeSaveAs || supportsSavePicker() ?
               "Save as a new PDF (never overwrite a nonempty destination)" :
               "Save As unavailable in this environment; use Quick Export"}>
@@ -623,7 +624,7 @@ export function EditorApp({
           <button
             onClick={() => void saveCurrentFile()}
             disabled={!(session?.writableHandle || (session?.nativeToken && onNativeSave)) ||
-              !session?.fingerprint || !dirty || exporting}
+              !session?.fingerprint || !dirty || exporting || documentBusy}
             title={session?.nativeToken && onNativeSave ?
               "Native Save uses an automatic backup and Windows atomic replacement" :
               session?.writableHandle ?
@@ -634,8 +635,8 @@ export function EditorApp({
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
             setShowPrintPlan(true);
-          }} disabled={!session}>Print</button>
-          <button onClick={()=>setShowPageOperations(true)} disabled={!session}>
+          }} disabled={!session || documentBusy}>Print</button>
+          <button onClick={()=>setShowPageOperations(true)} disabled={!session || documentBusy}>
             Pages
           </button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
@@ -643,21 +644,21 @@ export function EditorApp({
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
       </header>
       <div className="toolstrip" role="toolbar" aria-label="PDF editing tools">
-        <button aria-pressed={tool === "select"} disabled={!session}
+        <button aria-pressed={tool === "select"} disabled={!session || documentBusy}
           className={tool === "select" ? "active" : ""}
           onClick={() => setTool("select")}>Select</button>
-        <button aria-pressed={tool === "callout"} disabled={!session || importingAnnotations}
+        <button aria-pressed={tool === "callout"} disabled={!session || documentBusy}
           className={tool === "callout" ? "active" : ""}
           onClick={() => setTool("callout")}>Callout ↗</button>
-        <button aria-pressed={tool === "text"} disabled={!session || importingAnnotations}
+        <button aria-pressed={tool === "text"} disabled={!session || documentBusy}
           className={tool === "text" ? "active" : ""}
           onClick={() => setTool("text")}>Add Text</button>
-        <button aria-pressed={tool === "note"} disabled={!session || importingAnnotations}
+        <button aria-pressed={tool === "note"} disabled={!session || documentBusy}
           className={tool === "note" ? "active" : ""}
           onClick={() => setTool("note")}>Comment</button>
         <span className="separator" />
-        <button disabled={importingAnnotations || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
-        <button disabled={importingAnnotations || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
+        <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
+        <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
         <span className="separator" />
         <button disabled={!session} onClick={() => setPageNumber((n) => Math.max(1, n - 1))}>◀</button>
         <span className="page-counter">Page {session ? pageNumber : "—"} / {session?.pdf.numPages ?? "—"}</span>
@@ -723,12 +724,12 @@ export function EditorApp({
             <label className="editor-label" htmlFor="callout-text">
               {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
             </label>
-            <textarea id="callout-text" value={selectedAnnotation.text}
+            <textarea id="callout-text" disabled={documentBusy} value={selectedAnnotation.text}
               onChange={(event) => changeMarkupText(selectedAnnotation, event.target.value)}
               rows={5} maxLength={20000} />
             {selectedAnnotation.kind !== "note" && <>
             <label className="editor-label" htmlFor="markup-font-size">Font size (points)</label>
-            <input id="markup-font-size" className="markup-number"
+            <input id="markup-font-size" className="markup-number" disabled={documentBusy}
               type="number" min={4} max={200}
               value={selectedAnnotation.style.fontSize}
               onChange={event=>{
@@ -741,7 +742,7 @@ export function EditorApp({
                 }}));
               }} />
             </>}
-            <button className="danger" onClick={() => {
+            <button className="danger" disabled={documentBusy} onClick={() => {
               setEditor((previous) => applyCommand(previous, {
                 type: "remove", annotationId: selectedAnnotation.id
               }));
