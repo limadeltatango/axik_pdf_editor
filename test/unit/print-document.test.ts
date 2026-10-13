@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PDFDocument, PDFName, PDFArray, rgb
+  PDFDocument, PDFName, PDFArray, PDFDict
 } from "pdf-lib";
 import {
   normalizeForFixedStockPrinting, PrintPreparationError
@@ -88,9 +88,9 @@ test("output contains vector page form XObjects rather than raster images",async
   const page=doc.getPage(0);
   const resources=page.node.Resources();
   assert.ok(resources);
-  const xobjects=resources?.lookupMaybe(PDFName.of("XObject"),PDFArray);
-  // pdf-lib normally stores XObject resources as a dictionary, so merely
-  // retaining vector contents on output page is sufficient here.
+  const xobjects=resources?.lookupMaybe(PDFName.of("XObject"),PDFDict);
+  assert.ok(xobjects, "Vector content must be embedded as page Form XObjects.");
+  assert.ok(xobjects.size()>0);
   assert.ok(page.node.Contents());
   assert.equal(output.warnings.some(w=>w.includes("printer has been contacted")),true);
 });
