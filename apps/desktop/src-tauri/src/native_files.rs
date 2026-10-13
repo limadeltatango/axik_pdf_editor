@@ -93,7 +93,10 @@ pub async fn open_native_pdf(
 ) -> Result<Option<NativeOpenedDocument>, String> {
     // File dialogs execute off the WebView's GUI thread.
     let selected = tauri::async_runtime::spawn_blocking(|| {
-        rfd::FileDialog::new().add_filter("PDF files", &["pdf"]).pick_file()
+        // Leave Windows' picker unrestricted; the source path, extension
+        // and %PDF header are checked *after* the user selects a file.
+        // This gives a second independent option when WebView2 filters break.
+        rfd::FileDialog::new().pick_file()
     }).await.map_err(|_| "The native Open dialog failed.")?;
     let Some(path) = selected else { return Ok(None) };
     let canonical = fs::canonicalize(path)
