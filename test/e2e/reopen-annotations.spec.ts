@@ -26,8 +26,8 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
     tab.on("dialog",dialog=>{void dialog.accept()});
     await tab.goto("chrome-extension://"+new URL(worker.url()).hostname+"/viewer.html");
     await tab.locator('input[type="file"]').setInputFiles(source);
-    await expect(tab.getByRole("button",{name:"Callout"})).toBeEnabled({timeout:20_000});
-    await tab.getByRole("button",{name:"Callout"}).click();
+    await expect(tab.locator(".toolstrip").getByRole("button",{name:/Callout/})).toBeEnabled({timeout:20_000});
+    await tab.locator(".toolstrip").getByRole("button",{name:/Callout/}).click();
     await tab.locator("svg.annotation-layer").click({position:{x:105,y:145}});
     await expect(tab.getByLabel("Callout text")).toBeVisible();
     await tab.getByLabel("Callout text").fill("Original coordination request");
@@ -38,7 +38,7 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
     // Reopen the saved PDF and edit the native annotation from the Axik sidebar.
     await tab.locator('input[type="file"]').setInputFiles(draft);
     await expect(tab.locator(".filename")).toHaveText("draft.pdf",{timeout:20_000});
-    await expect(tab.getByRole("button",{name:"Callout"})).toBeEnabled({timeout:20_000});
+    await expect(tab.locator(".toolstrip").getByRole("button",{name:/Callout/})).toBeEnabled({timeout:20_000});
     const importedItem=tab.locator(".comment-item").filter({
       hasText:"Original coordination request"
     });
