@@ -4,7 +4,7 @@ import {
 } from "pdf-lib";
 import {
   calloutToStandardPayload, validateAnnotation,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Point
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type VisualSignatureAnnotation, type Point
 } from "@axik/document-core";
 
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
@@ -380,6 +380,60 @@ function addStickyNote(doc:PDFDocument,font:PDFFont,n:StickyNoteAnnotation):void
   addOrReplace(doc,page,n,ref);
 }
 
+
+/**
+ * Visual-only handwritten signature as a standard PDF /Ink annotation.
+ * No certificate, digital signing dictionary or claimed identity verification.
+ */
+function addSignature(doc:PDFDocument,a:VisualSignatureAnnotation):void{
+  validateAnnotation(a);
+  if(a.pageIndex>=doc.getPageCount())throw new RangeError("Visual signature page does not exist.");
+  const page=doc.getPage(a.pageIndex);
+  const context=doc.context;
+  const color=hexToRgb(a.color);
+  const graphics=[
+    "q",
+    color.map(safePdfNumber).join(" ")+" RG",
+    safePdfNumber(a.lineWidth)+" w","1 J","1 j"
+  ];
+  const inkList:number[][]=[];
+  for(const stroke of a.strokes){
+    const points=stroke.map(p=>({
+      x:a.box.x+p.x*a.box.width,
+      y:a.box.y+(1-p.y)*a.box.height
+    }));
+    const coords:number[]=[];
+    for(const p of points)coords.push(p.x,p.y);
+    inkList.push(coords);
+    for(const [index,point] of points.entries()){
+      graphics.push(
+        safePdfNumber(point.x-a.box.x)+" "+
+        safePdfNumber(point.y-a.box.y)+(index===0?" m":" l")
+      );
+    }
+    graphics.push("S");
+  }
+  graphics.push("Q");
+  const appearance=context.register(context.flateStream(graphics.join("\n")+"\n",{
+    Type:PDFName.of("XObject"),Subtype:PDFName.of("Form"),FormType:1,
+    BBox:[0,0,a.box.width,a.box.height]
+  }));
+  const state=context.obj({
+    Type:PDFName.of("Annot"),Subtype:PDFName.of("Ink"),
+    Subj:PDFHexString.fromText("Axik Visual Signature (non-certified)"),
+    Rect:[a.box.x,a.box.y,a.box.x+a.box.width,a.box.y+a.box.height],
+    InkList:inkList,
+    C:color,BS:{W:a.lineWidth,S:PDFName.of("S")},F:4,
+    Contents:PDFHexString.fromText(a.text),
+    T:PDFHexString.fromText((a.author||"Axik PDF").slice(0,80)),
+    NM:PDFHexString.fromText(a.id),
+    M:PDFString.of(isoPdfDate(new Date(a.updatedAt))),
+    AP:{N:appearance}
+  });
+  const ref=context.register(state);
+  addOrReplace(doc,page,a,ref);
+}
+
 /**
  * ALPHA: Write PDF-native, editable FreeText callout dictionaries and appearance
  * streams for a bounded source PDF. Visual rendering and interoperability with
@@ -412,6 +466,10 @@ export async function exportEditedPdf(
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const warnings: string[] = [];
   for (const annotation of supported) {
+    if(annotation.kind==="signature"){
+      addSignature(doc,annotation);
+      continue;
+    }
     if(annotation.kind==="note"){
       addStickyNote(doc,font,annotation);
       continue;
