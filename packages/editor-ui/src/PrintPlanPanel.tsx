@@ -260,7 +260,7 @@ export function PrintPlanPanel({
           No installed printers found, or discovery is pending.
         </p>}
       </div>}
-      {!pages && !error && <p role="status">Reading page geometry: {count} / {pdf.numPages}</p>
+      {!pages && !error && <p role="status">Reading page geometry: {count} / {pdf.numPages}</p>}
       {(error || planError) && <p role="alert" className="diagnostics-warning">{error || planError}</p>}
       {plan && <>
         <p>{printPlanSummary(plan)}</p>
