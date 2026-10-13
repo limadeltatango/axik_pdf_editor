@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
-  type Annotation, type CalloutAnnotation, type EditorState
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -60,7 +60,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [activePage, setActivePage] = useState<PdfPage>();
   const [pageNumber, setPageNumber] = useState(1);
   const [zoom, setZoom] = useState(1);
-  const [tool, setTool] = useState<"select" | "callout">("select");
+  const [tool, setTool] = useState<"select" | "callout" | "text">("select");
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
@@ -279,7 +279,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     setRecovery(undefined);
   }
 
-  const addCallout = (annotation: CalloutAnnotation) => {
+  const addCallout = (annotation: CalloutAnnotation | TextBoxAnnotation) => {
     try {
       setEditor((previous) => applyCommand(previous, { type: "add", annotation }));
       diagnostics.record("annotation", "ANNOTATION_ADDED", "info", {
@@ -292,7 +292,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     }
   };
 
-  function changeCallout(annotation: CalloutAnnotation, text: string) {
+  const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
+
+  function changeMarkupText(annotation: CalloutAnnotation | TextBoxAnnotation, text: string) {
     try {
       setEditor((previous) => applyCommand(previous, {
         type: "replace",
@@ -516,6 +518,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         <button aria-pressed={tool === "callout"} disabled={!session}
           className={tool === "callout" ? "active" : ""}
           onClick={() => setTool("callout")}>Callout ↗</button>
+        <button aria-pressed={tool === "text"} disabled={!session}
+          className={tool === "text" ? "active" : ""}
+          onClick={() => setTool("text")}>Add Text</button>
         <span className="separator" />
         <button disabled={!editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={!editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
@@ -557,11 +562,12 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
                 tool={tool}
                 annotations={editor.annotations}
                 selectedAnnotationId={selectedId}
-                onSelect={setSelectedId} onAddCallout={addCallout}
+                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText}
               />
               <p className="workspace-tip">
-                {tool === "callout" ? "Click the document where the arrow should point." :
-                  "Click a callout to edit its text in the right-hand panel."}
+                {tool === "callout" ? "Click where the callout arrow should point." :
+                  tool === "text" ? "Click to place an editable text box." :
+                  "Select a callout or added text box to edit it."}
               </p>
             </div>
           )}
@@ -574,21 +580,36 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
               onClick={() => { setPageNumber(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
-              <strong>{annotation.kind === "callout" ? "Callout" : "Note"} · Page {annotation.pageIndex + 1}</strong>
+              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
           ))}
-          {selectedAnnotation?.kind === "callout" && <>
-            <label className="editor-label" htmlFor="callout-text">Callout text</label>
+          {selectedAnnotation && selectedAnnotation.kind !== "note" && <>
+            <label className="editor-label" htmlFor="callout-text">
+              {selectedAnnotation.kind === "callout" ? "Callout text" : "New text"}
+            </label>
             <textarea id="callout-text" value={selectedAnnotation.text}
-              onChange={(event) => changeCallout(selectedAnnotation, event.target.value)}
+              onChange={(event) => changeMarkupText(selectedAnnotation, event.target.value)}
               rows={5} maxLength={20000} />
+            <label className="editor-label" htmlFor="markup-font-size">Font size (points)</label>
+            <input id="markup-font-size" className="markup-number"
+              type="number" min={4} max={200}
+              value={selectedAnnotation.style.fontSize}
+              onChange={event=>{
+                const size=Number(event.target.value);
+                if(!Number.isFinite(size)||size<4||size>200)return;
+                setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                  ...selectedAnnotation,
+                  style:{...selectedAnnotation.style,fontSize:size},
+                  updatedAt:new Date().toISOString()
+                }}));
+              }} />
             <button className="danger" onClick={() => {
               setEditor((previous) => applyCommand(previous, {
                 type: "remove", annotationId: selectedAnnotation.id
               }));
               setSelectedId(undefined);
-            }}>Delete callout</button>
+            }}>Delete {selectedAnnotation.kind==="callout"?"callout":"text box"}</button>
           </>}
           <div className="sidebar-footer">
             <strong>Save status</strong>
