@@ -13,6 +13,11 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
+import {
+  backupSuggestedName, pickEditablePdf, promptForSaveTarget,
+  safeOverwriteOriginal, safeSaveAs, supportsEditablePicker, supportsSavePicker,
+  type ExplicitFileHandle
+} from "./save-files";
 import "./styles.css";
 
 export interface EditorAppProps {
@@ -26,6 +31,7 @@ interface Session {
   pdf: PdfDocument;
   source: Uint8Array;
   fingerprint?: string;
+  writableHandle?: ExplicitFileHandle;
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
@@ -129,7 +135,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     return () => window.removeEventListener("beforeunload", warnUnsaved);
   }, [editor]);
 
-  const openFile = useCallback(async (file: File) => {
+  const openFile = useCallback(async (file: File, writableHandle?: ExplicitFileHandle) => {
     if (session && hasEdits(editor)) {
       if (!window.confirm("Changes are draft-only and not embedded in the PDF. Store the local draft and open another file?")) {
         return;
@@ -176,7 +182,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
         durationMs: performance.now() - openStart,
         fileSizeBucketMiB: sizeBucket, pageCount: pdf.numPages
       });
-      setSession({ name: file.name, source, pdf });
+      setSession({ name: file.name, source, pdf, writableHandle });
       setPageNumber(1);
       setZoom(1);
       setTool("select");
@@ -218,6 +224,20 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
       void openFile(requestedFile);
     }
   }, [requestedFile, openFile]);
+
+  async function choosePdf() {
+    if (!supportsEditablePicker()) {
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const selected = await pickEditablePdf();
+      await openFile(selected.file, selected.handle);
+    } catch (reason) {
+      if (reason instanceof Error && reason.name === "AbortError") return;
+      setError("Could not open selected PDF: " + pdfError(reason));
+    }
+  }
 
   function handleChooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -314,6 +334,128 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
     }
   }
 
+  /**
+   * Prepare a new viewer before committing a save. This avoids reporting success
+   * then discovering that our PDF renderer cannot reopen the written bytes.
+   * The old source remains open if any save stage fails.
+   */
+  async function preparePdfForSave(bytes: Uint8Array): Promise<PdfDocument> {
+    const task = startOpenPdf(bytes);
+    try {
+      return await task.promise;
+    } catch (reason) {
+      await task.destroy().catch(() => undefined);
+      throw reason;
+    }
+  }
+
+  async function finishSavedPdf(
+    bytes: Uint8Array, name: string, handle: ExplicitFileHandle,
+    fingerprint: string, pdf: PdfDocument
+  ) {
+    const prior = session?.fingerprint;
+    setSession({ source: bytes, name, writableHandle: handle, fingerprint, pdf });
+    setEditor(initialEditorState());
+    setPageNumber(1);
+    setSelectedId(undefined);
+    setTool("select");
+    setRecovery(undefined);
+    setJournalStatus("No unsaved draft annotations");
+    // Stored pre-save draft changes belong to the old source version.
+    if (prior) await deleteDraft(prior).catch(() => undefined);
+  }
+
+  async function saveAsFile() {
+    if (!session || exporting || !supportsSavePicker()) return;
+    // IMPORTANT: invoke the OS picker before any await that would lose the
+    // transient user activation needed in Chromium extension pages.
+    let target: ExplicitFileHandle;
+    try {
+      target = await promptForSaveTarget(session.name.replace(/\.pdf$/i, "") + "-edited.pdf");
+    } catch (reason) {
+      if (reason instanceof Error && reason.name === "AbortError") return;
+      setError("Could not choose Save As destination: " + pdfError(reason));
+      return;
+    }
+
+    setExporting(true);
+    const started = performance.now();
+    diagnostics.record("document", "PDF_SAVE_AS_START");
+    let preview: PdfDocument | undefined;
+    try {
+      const result = await exportEditedPdf(session.source, editor.annotations);
+      preview = await preparePdfForSave(result.bytes);
+      const fingerprint = await safeSaveAs(target, result.bytes, session.writableHandle);
+      await finishSavedPdf(result.bytes, target.name, target, fingerprint, preview);
+      preview = undefined;
+      diagnostics.record("document", "PDF_SAVE_AS_OK", "info", {
+        durationMs: performance.now() - started
+      });
+      setNotice("Saved a new PDF: " + target.name +
+        ". This file is now active. Existing saved callouts are visible, but imported callout editing in Axik is still being developed.");
+    } catch (reason) {
+      diagnostics.recordError("document", "PDF_SAVE_AS_FAILED", reason, {
+        durationMs: performance.now() - started
+      });
+      setError("Save As did not complete: " + pdfError(reason));
+    } finally {
+      if (preview) await preview.destroy().catch(() => undefined);
+      setExporting(false);
+    }
+  }
+
+  async function saveCurrentFile() {
+    if (!session?.writableHandle || !session.fingerprint || !dirty || exporting) return;
+    // A separately selected backup is REQUIRED by the alpha before overwriting.
+    // Native desktop backup generation will later remove this extra picker.
+    let backup: ExplicitFileHandle;
+    try {
+      backup = await promptForSaveTarget(backupSuggestedName(session.name));
+    } catch (reason) {
+      if (reason instanceof Error && reason.name === "AbortError") return;
+      setError("Could not select backup location: " + pdfError(reason));
+      return;
+    }
+    const acknowledged = window.confirm(
+      "SAVE WILL OVERWRITE YOUR ORIGINAL PDF. Axik will first save and verify " +
+      "a separate backup at the location you just chose. Continue?"
+    );
+    if (!acknowledged) return;
+    setExporting(true);
+    const started = performance.now();
+    diagnostics.record("document", "PDF_SAVE_START");
+    let preview: PdfDocument | undefined;
+    try {
+      const original = session;
+      const result = await exportEditedPdf(original.source, editor.annotations);
+      preview = await preparePdfForSave(result.bytes);
+      const fingerprint = await safeOverwriteOriginal({
+        originalHandle: original.writableHandle!, backupHandle: backup,
+        sourceFingerprint: original.fingerprint!,
+        originalBytes: original.source, editedBytes: result.bytes
+      });
+      await finishSavedPdf(result.bytes, original.name, original.writableHandle!, fingerprint, preview);
+      preview = undefined;
+      diagnostics.record("document", "PDF_SAVE_OK", "info", {
+        durationMs: performance.now() - started
+      });
+      setNotice("Original overwritten after a separately verified backup was saved as " +
+        backup.name + ". The written PDF was reopened successfully.");
+    } catch (reason) {
+      if (reason instanceof Error && reason.name === "FileChangedError") {
+        diagnostics.record("document", "PDF_SAVE_CONFLICT", "warn");
+      }
+      diagnostics.recordError("document", "PDF_SAVE_FAILED", reason, {
+        durationMs: performance.now() - started
+      });
+      setError("Save was blocked or failed: " + pdfError(reason) +
+        ". If a backup file was created, retain it until the document is verified.");
+    } finally {
+      if (preview) await preview.destroy().catch(() => undefined);
+      setExporting(false);
+    }
+  }
+
   function exportOriginal() {
     if (!session || dirty) {
       diagnostics.record("document", "PDF_EXPORT_BLOCKED", "warn");
@@ -334,7 +476,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           {session?.name ?? "No document open"}
         </div>
         <div className="topbar-actions">
-          <button onClick={() => fileInputRef.current?.click()} disabled={loading}>
+          <button onClick={() => void choosePdf()} disabled={loading}>
             {loading ? "Opening…" : "Open PDF"}
           </button>
           <button onClick={exportOriginal} disabled={!session || dirty || exporting}
@@ -345,6 +487,22 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
             disabled={!session || !dirty || exporting}
             title="Download a separate edited PDF with native FreeText callout annotations">
             {exporting ? "Saving…" : "Export edited PDF"}
+          </button>
+          <button
+            onClick={() => void saveAsFile()}
+            disabled={!session || exporting || !supportsSavePicker()}
+            title={supportsSavePicker() ?
+              "Save as a new PDF filename (never overwrite a nonempty destination)" :
+              "This WebView does not support File System Access; use Quick Export"}>
+            Save As…
+          </button>
+          <button
+            onClick={() => void saveCurrentFile()}
+            disabled={!session?.writableHandle || !session.fingerprint || !dirty || exporting}
+            title={session?.writableHandle ?
+              "Overwrite this source only after choosing and verifying a separate backup" :
+              "Open with the editable file picker to enable safe overwrite; ordinary imports remain read-only"}>
+            Save
           </button>
           <button onClick={() => {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
@@ -388,8 +546,10 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           {!session && <section className="welcome">
             <h1>Your documents, without the overhead.</h1>
             <p>Open a PDF to view it, navigate pages and try the local callout tool.</p>
-            <button className="primary" onClick={() => fileInputRef.current?.click()}>Choose a PDF</button>
-            <p className="muted">Or drag a PDF onto this window. Files are processed locally.</p>
+            <button className="primary" onClick={() => void choosePdf()}>Choose a PDF</button>
+            <p className="muted">Or drag a PDF onto this window. Files are processed locally.
+              When supported, choosing a file directly enables Save with a verified separate backup.
+              Dragged and downloaded files still support Quick Export and Save As.</p>
             <p className="warning-note">This is an early foundation. Editing, intelligent printing, signing and
               secure redaction are not yet complete and must not be relied on for production work.</p>
           </section>}
@@ -436,9 +596,10 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           <div className="sidebar-footer">
             <strong>Save status</strong>
             <p>{dirty ? journalStatus : "No unsaved annotations"}</p>
-            <p className="muted">Alpha PDF export writes native callouts to a new PDF.
-              Long text, transparency and some fonts remain limited. True redaction,
-              visual signing and printer-driver control are not implemented.</p>
+            <p className="muted">Quick Export never overwrites. Save As selects a new file;
+              Save overwrites a user-picked source only after a separate verified backup.
+              Long text, fonts and imported-callout editing are still limited. Printing,
+              real existing-text editing and secure redaction are not implemented.</p>
           </div>
         </aside>
       </div>
