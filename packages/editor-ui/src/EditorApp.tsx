@@ -27,6 +27,10 @@ export interface EditorAppProps {
   requestedFile?: File;
   /** Desktop-only, privileged, explicit user-action print file handoff. */
   onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
+  onPrinterList?: ()=>Promise<import("@axik/print-plan").InstalledPrinter[]>;
+  onPrinterCapabilities?: (
+    printerName:string
+  )=>Promise<import("@axik/print-plan").DriverPrinterCapabilities>;
   onNativeOpen?: ()=>Promise<{name:string;token:string;bytes:Uint8Array}|null>;
   onNativeSave?: (token:string,bytes:Uint8Array)=>Promise<{name:string;token:string;backupName?:string|null}>;
   onNativeSaveAs?: (bytes:Uint8Array,suggestedName:string)=>
@@ -61,7 +65,8 @@ function downloadBlob(name: string, content: Uint8Array): void {
 }
 
 export function EditorApp({
-  environment,requestedFile,onNativePrint,onNativeOpen,onNativeSave,onNativeSaveAs
+  environment,requestedFile,onNativePrint,onNativeOpen,onNativeSave,onNativeSaveAs,
+  onPrinterList,onPrinterCapabilities
 }: EditorAppProps) {
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -723,6 +728,7 @@ export function EditorApp({
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
         onNativePrint={onNativePrint}
+        onPrinterList={onPrinterList} onPrinterCapabilities={onPrinterCapabilities}
         onClose={() => setShowPrintPlan(false)} />}
       {showPageOperations && session && <PageOperationsPanel
         pdf={session.pdf} source={session.source}
