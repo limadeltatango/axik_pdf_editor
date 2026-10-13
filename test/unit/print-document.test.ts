@@ -90,7 +90,7 @@ test("output contains vector page form XObjects rather than raster images",async
   assert.ok(resources);
   const xobjects=resources?.lookupMaybe(PDFName.of("XObject"),PDFDict);
   assert.ok(xobjects, "Vector content must be embedded as page Form XObjects.");
-  assert.ok(xobjects.size()>0);
+  assert.ok(xobjects.keys().length>0);
   assert.ok(page.node.Contents());
   assert.equal(output.warnings.some(w=>w.includes("printer has been contacted")),true);
 });
