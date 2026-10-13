@@ -56,6 +56,17 @@ The exact dependency versions/Cargo manifests, local development CSP and build c
 
 For the extension, the future validated workflow will load `apps/chromium-extension/dist` as an unpacked extension. For the Windows desktop, Tauri bundling is deliberately disabled until installer design and runtime/security prerequisites have been qualified.
 
+## Construction drawing revisions (planned, not implemented)
+
+The future [Revision Manager](docs/REVISION_MANAGER.md) will preserve an immutable
+baseline PDF, let users create reviewable proposed changes, record explicit
+approval decisions and incorporate **approved changes only** into a new controlled
+PDF revision. It must never claim PDF markups alter a CAD/BIM authoring file.
+
+This workflow follows **safe Save/Overwrite**, real mixed-orientation
+**physical printing**, and **text editing**. Quick Export remains independent and
+non-destructive. See [APDF-44](https://axikai.atlassian.net/browse/APDF-44).
+
 ## Specification (draft)
 
 | Document | Coverage |
