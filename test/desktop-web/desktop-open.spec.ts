@@ -37,6 +37,13 @@ test("desktop Open PDF shows standard filechooser and loads PDFs", async () => {
     });
     await expect(page.getByRole("button", {name:"Open PDF", exact:true}))
       .toBeVisible();
+    const nativeUnfilteredInput=page.locator('input[type="file"]');
+    await expect(nativeUnfilteredInput).toHaveCount(1);
+    // APDF-52 reproduction: Windows displayed
+    // "Custom files (*.pdf;*.pdf)" from application/pdf,.pdf,
+    // and disabled its Open action for a user-selected PDF.
+    // The desktop picker must have NO MIME/extension filter.
+    await expect(nativeUnfilteredInput).not.toHaveAttribute("accept");
 
     // The new advanced native dialog must NOT monopolize basic PDF opening.
     await expect(page.getByRole("button", {name:"Open for Save…"}))
@@ -61,6 +68,16 @@ test("desktop Open PDF shows standard filechooser and loads PDFs", async () => {
       timeout: 20_000
     });
     await expect(page.locator(".page-counter")).toHaveText("Page 1 / 2");
+
+    // The unfiltered dialog can return a non-PDF: reject it explicitly.
+    const notPdf=join(folder,"not-a-pdf.txt");
+    await writeFile(notPdf,"Plain text, not a PDF");
+    const thirdChooser=page.waitForEvent("filechooser", {timeout:5000});
+    await page.getByRole("button",{name:"Open PDF",exact:true}).click();
+    await (await thirdChooser).setFiles(notPdf);
+    await expect(page.getByText("Please select an existing PDF document (.pdf)."))
+      .toBeVisible();
+    await expect(page.locator(".filename")).toHaveText("test-two.pdf");
     expect(errors).toEqual([]);
   } finally {
     await browser.close();
