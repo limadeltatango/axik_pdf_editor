@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
+  type VisualSignatureAnnotation, type Point, type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -13,6 +14,7 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { PageOperationsPanel } from "./PageOperationsPanel";
+import { SignaturePad } from "./SignaturePad";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
@@ -77,7 +79,9 @@ export function EditorApp({
   const [activePage, setActivePage] = useState<PdfPage>();
   const [pageNumber, setPageNumber] = useState(1);
   const [zoom, setZoom] = useState(1);
-  const [tool, setTool] = useState<"select" | "callout" | "text" | "note">("select");
+  const [tool, setTool] = useState<"select" | "callout" | "text" | "note" | "signature">("select");
+  const [showSignaturePad,setShowSignaturePad]=useState(false);
+  const [pendingSignature,setPendingSignature]=useState<readonly (readonly Point[])[]>();
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
@@ -221,6 +225,8 @@ export function EditorApp({
       setPageNumber(1);
       setZoom(1);
       setTool("select");
+      setPendingSignature(undefined);
+      setShowSignaturePad(false);
       setSelectedId(undefined);
       setEditor(initialEditorState());
       setShowPrintPlan(false);
@@ -342,6 +348,10 @@ export function EditorApp({
 
   const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
   const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
+  const addSignature=(annotation:VisualSignatureAnnotation)=>{
+    addCallout(annotation);
+    setPendingSignature(undefined);
+  };
 
   function changeMarkupText(annotation: Annotation, text: string) {
     try {
@@ -656,6 +666,12 @@ export function EditorApp({
         <button aria-pressed={tool === "note"} disabled={!session || documentBusy}
           className={tool === "note" ? "active" : ""}
           onClick={() => setTool("note")}>Comment</button>
+        <button disabled={!session || documentBusy}
+          aria-pressed={tool==="signature"} className={tool==="signature"?"active":""}
+          onClick={()=>{
+            if(pendingSignature?.length){setTool("signature");return;}
+            setShowSignaturePad(true);
+          }}>Visual signature</button>
         <span className="separator" />
         <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
@@ -697,12 +713,15 @@ export function EditorApp({
                 tool={tool}
                 annotations={editor.annotations}
                 selectedAnnotationId={selectedId}
-                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
+                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText}
+                onAddNote={addNote} onAddSignature={addSignature}
+                signatureStrokes={pendingSignature}
               />
               <p className="workspace-tip">
                 {tool === "callout" ? "Click where the callout arrow should point." :
                   tool === "text" ? "Click to place an editable text box." :
                   tool === "note" ? "Click to leave a sticky note comment." :
+                  tool === "signature" ? "Click to place the drawn visual signature; not digitally certified." :
                   "Select a callout or added text box to edit it."}
               </p>
             </div>
@@ -716,11 +735,12 @@ export function EditorApp({
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
               onClick={() => { setPageNumber(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
-              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
+              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" :
+                annotation.kind==="signature" ? "Visual signature" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
           ))}
-          {selectedAnnotation && <>
+          {selectedAnnotation && selectedAnnotation.kind!=="signature" && <>
             <label className="editor-label" htmlFor="callout-text">
               {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
             </label>
@@ -749,6 +769,18 @@ export function EditorApp({
               setSelectedId(undefined);
             }}>Delete {selectedAnnotation.kind==="callout"?"callout":selectedAnnotation.kind==="text"?"text box":"comment"}</button>
           </>}
+          {selectedAnnotation?.kind==="signature" && <div className="signature-detail">
+            <strong>Visual handwritten ink</strong>
+            <p className="muted">This is not a certificate-based digital signature
+              or verified approval.</p>
+            <button className="danger" disabled={documentBusy}
+              onClick={()=>{
+                setEditor(previous=>applyCommand(previous,{
+                  type:"remove",annotationId:selectedAnnotation.id
+                }));
+                setSelectedId(undefined);
+              }}>Delete visual signature</button>
+          </div>}
           <div className="sidebar-footer">
             <strong>Save status</strong>
             <p>{dirty ? journalStatus : "No unsaved annotations"}</p>
@@ -770,6 +802,12 @@ export function EditorApp({
         annotations={editor.annotations}
         importedAnnotations={session.importedAnnotations} name={session.name}
         onClose={()=>setShowPageOperations(false)} />}
+      {showSignaturePad && <SignaturePad onCancel={()=>setShowSignaturePad(false)}
+        onAccept={strokes=>{
+          setPendingSignature(strokes);
+          setTool("signature");
+          setShowSignaturePad(false);
+        }} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
       } version="0.1.0" onClose={() => setShowDiagnostics(false)} />}

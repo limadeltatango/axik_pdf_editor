@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type MouseEvent } from "react";
 import {
-  newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Matrix, type Point
+  newCallout, newTextBox, newStickyNote, newVisualSignature, pdfToViewport, transformedRect, viewportToPdf,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type VisualSignatureAnnotation, type Matrix, type Point
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
@@ -10,13 +10,15 @@ export interface PageCanvasProps {
   page: PdfPage | undefined;
   pageIndex: number;
   zoom: number;
-  tool: "select" | "callout" | "text" | "note";
+  tool: "select" | "callout" | "text" | "note" | "signature";
   annotations: readonly Annotation[];
   selectedAnnotationId?: string;
   onSelect: (id: string) => void;
   onAddCallout: (annotation: CalloutAnnotation) => void;
   onAddText: (annotation: TextBoxAnnotation) => void;
   onAddNote: (annotation: StickyNoteAnnotation) => void;
+  onAddSignature: (annotation: VisualSignatureAnnotation) => void;
+  signatureStrokes?: readonly (readonly Point[])[];
 }
 
 interface ViewportInfo {
@@ -34,7 +36,7 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 
 export function PageCanvas({
   page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout, onAddText, onAddNote
+  onSelect, onAddCallout, onAddText, onAddNote, onAddSignature,signatureStrokes
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
@@ -105,7 +107,7 @@ export function PageCanvas({
   }, [page, zoom]);
 
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
-    if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
+    if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note" && tool !== "signature")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const tip = viewportToPdf(viewport.transform, {
       x: event.clientX - bounds.left, y: event.clientY - bounds.top
@@ -121,9 +123,14 @@ export function PageCanvas({
         onAddText(newTextBox({
           id: crypto.randomUUID(),pageIndex,location:tip,pageBounds
         }));
-      }else{
+      }else if(tool==="note"){
         onAddNote(newStickyNote({
           id:crypto.randomUUID(),pageIndex,position:tip
+        }));
+      }else if(signatureStrokes?.length){
+        onAddSignature(newVisualSignature({
+          id:crypto.randomUUID(),pageIndex,location:tip,
+          pageBounds,strokes:signatureStrokes
         }));
       }
     } catch (reason) {
@@ -152,6 +159,23 @@ export function PageCanvas({
             // PDF.js already paints imported native appearances underneath.
             // Keep the edit handle faint until the document is exported again.
             const imported=Boolean(annotation.sourceName);
+            if(annotation.kind==="signature"){
+              const rect=transformedRect(viewport.transform,annotation.box);
+              return <g key={annotation.id}
+                onClick={event=>{event.stopPropagation();onSelect(annotation.id)}}
+                className="annotation-mark"
+                opacity={imported?0.18:1}>
+                {annotation.strokes.map((stroke,index)=>{
+                  const points=stroke.map(p=>(
+                    (rect.x+p.x*rect.width)+","+
+                    (rect.y+p.y*rect.height)
+                  )).join(" ");
+                  return <polyline key={index} points={points}
+                    stroke={annotation.color} strokeWidth={annotation.lineWidth*zoom}
+                    strokeLinecap="round" strokeLinejoin="round" fill="none"/>;
+                })}
+              </g>;
+            }
             if (annotation.kind === "text") {
               const rect = transformedRect(viewport.transform, annotation.box);
               const selected = selectedAnnotationId === annotation.id;

@@ -77,7 +77,7 @@ function parse(dict:PDFDict,pageIndex:number):Annotation|undefined{
   const rawSubtype=dict.lookup(PDFName.of("Subtype"));
   if(!(rawSubtype instanceof PDFName))return undefined;
   const subtype=rawSubtype.asString();
-  if(subtype!=="/FreeText" && subtype!=="/Text")return undefined;
+  if(subtype!=="/FreeText" && subtype!=="/Text" && subtype!=="/Ink")return undefined;
   const text=str(dict,"Contents")??"";
   if(text.length>20000)return undefined;
   const rect=rectangle(nums(dict,"Rect",4));
@@ -91,6 +91,39 @@ function parse(dict:PDFDict,pageIndex:number):Annotation|undefined{
   if(subtype==="/Text"){
     return validateAnnotation({
       ...common,kind:"note",position:{x:rect.x,y:rect.y}
+    });
+  }
+
+  if(subtype==="/Ink"){
+    if(str(dict,"Subj")!=="Axik Visual Signature (non-certified)")return undefined;
+    const raw=dict.lookup(PDFName.of("InkList"));
+    if(!(raw instanceof PDFArray) || raw.size()<1 || raw.size()>50)return undefined;
+    const strokes:Point[][]=[];
+    for(let i=0;i<raw.size();i++){
+      const points=raw.get(i);
+      if(!(points instanceof PDFArray) || points.size()<4 ||
+         points.size()>2000 || points.size()%2!==0)return undefined;
+      const stroke:Point[]=[];
+      for(let at=0;at<points.size();at+=2){
+        const x=points.get(at),y=points.get(at+1);
+        if(!(x instanceof PDFNumber)||!(y instanceof PDFNumber))return undefined;
+        const normalizedX=(x.asNumber()-rect.x)/rect.width;
+        const normalizedY=1-(y.asNumber()-rect.y)/rect.height;
+        if(!Number.isFinite(normalizedX)||!Number.isFinite(normalizedY))return undefined;
+        stroke.push({
+          x:Math.max(0,Math.min(1,normalizedX)),
+          y:Math.max(0,Math.min(1,normalizedY))
+        });
+      }
+      strokes.push(stroke);
+    }
+    return validateAnnotation({
+      ...common,
+      kind:"signature",intent:"VisualInkSignature",
+      text:"Visible signature (not digitally certified)",
+      box:rect,strokes,
+      color:style(dict).stroke,
+      lineWidth:style(dict).lineWidth
     });
   }
   const intent=dict.lookup(PDFName.of("IT"));

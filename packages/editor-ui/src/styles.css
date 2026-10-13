@@ -232,3 +232,11 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   flex-wrap:wrap;font-size:12px}
 .printer-capabilities select {border:1px solid #5b7794;background:#28415b;
   color:#fff;border-radius:5px;padding:7px;max-width:100%}
+
+.signature-panel {width:min(620px,96vw);max-height:90vh;overflow-y:auto;
+  background:#1d3045;padding:24px;border:1px solid #516b88;border-radius:12px;
+  box-shadow:0 28px 85px #0009}
+.signature-pad {display:block;width:100%;height:auto;aspect-ratio:3/1;
+  touch-action:none;cursor:crosshair;border:1px solid #68839f;
+  border-radius:5px;background:#fff;user-select:none}
+.signature-detail {border-top:1px solid #3b5166;padding:10px 0}
