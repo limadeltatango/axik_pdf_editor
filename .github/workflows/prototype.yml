@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/prototype-alpha-20261013
+      - feat/apdf-45-save-workflow
   workflow_dispatch:
 
 permissions:
