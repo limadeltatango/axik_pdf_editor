@@ -205,7 +205,9 @@ export class DiagnosticRecorder {
     };
     const byId = new Map<string, StoredDiagnosticSession>();
     for (const session of stored) byId.set(session.sessionId, session);
-    byId.set(current.sessionId, current);
+    if (current.events.length > 0) {
+      byId.set(current.sessionId, current);
+    }
     const sessions = [...byId.values()]
       .filter((item) => Date.parse(item.updatedAt) >= cutoff)
       .map((item) => ({
