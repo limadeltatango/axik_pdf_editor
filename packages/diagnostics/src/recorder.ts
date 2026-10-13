@@ -30,10 +30,11 @@ function validEvent(value: unknown): DiagnosticEvent | undefined {
   const raw = value as Partial<DiagnosticEvent>;
   if (raw.schema !== 1 ||
       typeof raw.sessionId !== "string" ||
-      !/^[a-zA-Z0-9-]{1,64}$/.test(raw.sessionId) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw.sessionId) ||
       !Number.isSafeInteger(raw.sequence) ||
       (raw.sequence ?? -1) < 0 ||
       typeof raw.timestamp !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(raw.timestamp) ||
       !Number.isFinite(Date.parse(raw.timestamp)) ||
       !ALLOWED_AREAS.includes(raw.area as DiagnosticArea) ||
       !DIAGNOSTIC_CODES.includes(raw.code as DiagnosticCode) ||
