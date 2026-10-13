@@ -15,6 +15,7 @@ import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { PageOperationsPanel } from "./PageOperationsPanel";
 import { SignaturePad } from "./SignaturePad";
+import { DocumentSearchPanel } from "./DocumentSearchPanel";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
@@ -93,6 +94,7 @@ export function EditorApp({
   const [showPrintPlan, setShowPrintPlan] = useState(false);
   const [showPageOperations, setShowPageOperations] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showSearch,setShowSearch]=useState(false);
   const [journalStatus, setJournalStatus] = useState("No draft edits");
 
   useEffect(() => {
@@ -649,6 +651,8 @@ export function EditorApp({
           <button onClick={()=>setShowPageOperations(true)} disabled={!session || documentBusy}>
             Pages
           </button>
+          <button disabled={!session || documentBusy}
+            onClick={()=>setShowSearch(true)}>Find</button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
@@ -802,6 +806,13 @@ export function EditorApp({
         annotations={editor.annotations}
         importedAnnotations={session.importedAnnotations} name={session.name}
         onClose={()=>setShowPageOperations(false)} />}
+      {showSearch && session && <DocumentSearchPanel
+        pdf={session.pdf}
+        onJump={page=>{
+          setPageNumber(page);
+          setShowSearch(false);
+        }}
+        onClose={()=>setShowSearch(false)} />}
       {showSignaturePad && <SignaturePad onCancel={()=>setShowSignaturePad(false)}
         onAccept={strokes=>{
           setPendingSignature(strokes);
