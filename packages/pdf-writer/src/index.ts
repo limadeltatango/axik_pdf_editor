@@ -4,7 +4,7 @@ import {
 } from "pdf-lib";
 import {
   calloutToStandardPayload, validateAnnotation,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type Point
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Point
 } from "@axik/document-core";
 
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
@@ -282,6 +282,42 @@ function addFreeText(doc:PDFDocument,font:PDFFont,a:TextBoxAnnotation):void{
   else page.node.set(PDFName.of("Annots"),context.obj([ref]));
 }
 
+
+function addStickyNote(doc:PDFDocument,font:PDFFont,n:StickyNoteAnnotation):void{
+  validateAnnotation(n);
+  if(n.pageIndex>=doc.getPageCount())throw new RangeError("Comment page does not exist.");
+  const page=doc.getPage(n.pageIndex);
+  const c=doc.context;
+  const size=20;
+  const appearance=c.register(c.flateStream(
+    ["q","0.98 0.84 0.25 rg",
+      "0 0 20 20 re f",
+      "0.50 0.30 0.03 RG 1 w","0.5 0.5 19 19 re S",
+      "BT","/"+FONT_KEY+" 14 Tf","0.20 0.19 0.10 rg",
+      "1 0 0 1 7 4 Tm","(i) Tj","ET","Q"
+    ].join("\n")+"\n",
+    {Type:PDFName.of("XObject"),Subtype:PDFName.of("Form"),
+     FormType:1,BBox:[0,0,size,size],
+     Resources:{Font:{[FONT_KEY]:font.ref}}}
+  ));
+  const state=c.obj({
+    Type:PDFName.of("Annot"),Subtype:PDFName.of("Text"),
+    Name:PDFName.of("Comment"),
+    Rect:[n.position.x,n.position.y,n.position.x+size,n.position.y+size],
+    Contents:PDFHexString.fromText(n.text),
+    T:PDFHexString.fromText((n.author||"Axik PDF").slice(0,80)),
+    NM:PDFHexString.fromText(n.id),
+    M:PDFString.of(isoPdfDate(new Date(n.updatedAt))),
+    F:4,Open:false,C:[1,0.84,0.25],
+    AP:{N:appearance}
+  });
+  const ref=c.register(state);
+  const raw=page.node.get(PDFName.of("Annots"));
+  const existing=raw?c.lookup(raw,PDFArray):undefined;
+  if(existing)existing.push(ref);
+  else page.node.set(PDFName.of("Annots"),c.obj([ref]));
+}
+
 /**
  * ALPHA: Write PDF-native, editable FreeText callout dictionaries and appearance
  * streams for a bounded source PDF. Visual rendering and interoperability with
@@ -299,12 +335,9 @@ export async function exportEditedPdf(
   if (annotations.length > 1_000) {
     throw new RangeError("The alpha writer supports up to 1,000 callouts.");
   }
-  const supported: (CalloutAnnotation|TextBoxAnnotation)[] = [];
+  const supported: Annotation[] = [];
   for(const annotation of annotations){
     validateAnnotation(annotation);
-    if(annotation.kind==="note"){
-      throw new Error("Sticky notes still require a validated native PDF annotation writer.");
-    }
     supported.push(annotation);
   }
 
@@ -315,6 +348,10 @@ export async function exportEditedPdf(
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const warnings: string[] = [];
   for (const annotation of supported) {
+    if(annotation.kind==="note"){
+      addStickyNote(doc,font,annotation);
+      continue;
+    }
     if (annotation.style.opacity !== 1) {
       warnings.push("Alpha appearance currently treats opacity as fully opaque.");
     }
