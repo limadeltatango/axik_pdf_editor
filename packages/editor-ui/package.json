@@ -17,7 +17,8 @@
     "pdfjs-dist": "^5.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@axik/diagnostics": "workspace:*"
+    "@axik/diagnostics": "workspace:*",
+    "@axik/pdf-writer": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
