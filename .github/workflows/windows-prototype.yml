@@ -1,0 +1,42 @@
+name: Windows desktop prototype installer
+
+on:
+  push:
+    branches:
+      - feat/prototype-alpha-20261013
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apdf-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-alpha:
+    name: Package unsigned Windows alpha
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Generate native icon assets
+        run: pnpm --filter @axik/desktop exec tauri icon ../../assets/app-icon.svg
+      - name: Compile desktop and NSIS setup program
+        run: pnpm build:desktop
+      - name: Upload unsigned Windows prototype installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: axik-pdf-desktop-windows-alpha
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
