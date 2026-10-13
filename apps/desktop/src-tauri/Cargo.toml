@@ -11,3 +11,5 @@ tauri-build = { version = "2" }
 
 [dependencies]
 tauri = { version = "2" }
+open = "5"
+tempfile = "3"
