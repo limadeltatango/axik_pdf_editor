@@ -477,7 +477,7 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
       <header className="topbar">
         <div className="app-brand">
           <span className="app-symbol">A</span>
-          <div><strong>Axik PDF Editor</strong><small>{environment === "desktop" ? "Desktop foundation" : "Chromium extension foundation"}</small></div>
+          <div><strong>Axik PDF Editor</strong><small>{environment === "desktop" ? "Desktop Core Alpha" : "Chromium Core Alpha"}</small></div>
         </div>
         <div className="filename" title={session?.name ?? "No PDF loaded"}>
           {session?.name ?? "No document open"}
@@ -545,7 +545,7 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
         <span className="zoom-display">{Math.round(zoom * 100)}%</span>
         <button disabled={!session} onClick={() => setZoom((n) => Math.min(MAX_ZOOM, Math.round((n + .2) * 10) / 10))}>+</button>
         <span className="spacer" />
-        <span className="prototype-label">Foundation · Not production-ready</span>
+        <span className="prototype-label">Core Alpha · Not production-ready</span>
       </div>
       {error && <div className="message error" role="alert">{error} <button onClick={() => setError(undefined)}>Dismiss</button></div>}
       {recovery && <div className="message recover" role="status">
@@ -645,7 +645,7 @@ export function EditorApp({ environment, requestedFile, onNativePrint }: EditorA
         onClose={()=>setShowPageOperations(false)} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
-      } version="0.0.1" onClose={() => setShowDiagnostics(false)} />}
+      } version="0.1.0" onClose={() => setShowDiagnostics(false)} />}
     </main>
   );
 }
