@@ -104,7 +104,7 @@ export async function createSupportBundle(
     createdAt: now.toISOString(), app: "Axik PDF Editor",
     runtime, appVersion: safeVersion, sessionCount: recent.sessions.length,
     eventCount: events.length, collectionEnabled: diagnostics.enabled,
-    persistentStorageAvailable: recent.localStorageAvailable,
+    persistentStorageAvailable: recent.persistentStorageAvailable,
     includesEnvironment: includeEnvironment,
     includesGpuDetails: includeGpuDetails,
     excludes: [
