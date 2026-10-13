@@ -13,11 +13,13 @@
     "build:desktop": "pnpm --filter @axik/desktop build",
     "build:extension": "pnpm --filter @axik/chromium-extension build",
     "typecheck": "pnpm -r typecheck",
-    "build:all": "pnpm build:extension && pnpm build:desktop"
+    "build:all": "pnpm build:extension && pnpm build:desktop",
+    "test": "tsx --test test/unit/*.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
     "vite": "^7.1.0",
-    "@vitejs/plugin-react": "^5.0.0"
+    "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.20.0"
   }
 }
