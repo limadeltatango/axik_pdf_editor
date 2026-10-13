@@ -249,11 +249,13 @@ export async function exportEditedPdf(
   if (annotations.length > 1_000) {
     throw new RangeError("The alpha writer supports up to 1,000 callouts.");
   }
+  const callouts: CalloutAnnotation[] = [];
   for (const annotation of annotations) {
     validateAnnotation(annotation);
     if (annotation.kind !== "callout") {
       throw new Error("The alpha writer only exports native callouts, not sticky notes.");
     }
+    callouts.push(annotation);
   }
 
   const doc = await PDFDocument.load(original.slice(), {
@@ -262,7 +264,7 @@ export async function exportEditedPdf(
   });
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const warnings: string[] = [];
-  for (const annotation of annotations) {
+  for (const annotation of callouts) {
     if (annotation.style.opacity !== 1) {
       warnings.push("Alpha appearance currently treats opacity as fully opaque.");
     }
