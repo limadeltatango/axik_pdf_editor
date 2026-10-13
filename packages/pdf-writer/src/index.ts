@@ -224,7 +224,8 @@ function addCallout(doc: PDFDocument, font: PDFFont, annotation: CalloutAnnotati
     AP: { N: appearanceRef }
   });
   const reference = context.register(state);
-  const existing = page.node.lookup(PDFName.of("Annots"), PDFArray);
+  const existingEntry = page.node.get(PDFName.of("Annots"));
+  const existing = existingEntry ? context.lookup(existingEntry, PDFArray) : undefined;
   if (existing) {
     existing.push(reference);
   } else {
