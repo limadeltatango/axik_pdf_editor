@@ -1,4 +1,5 @@
 import { encodeDiagnosticZip } from "./zip";
+import { summarizeDiagnostics } from "./summary";
 import { diagnostics } from "./recorder";
 import {
   type DiagnosticRuntime, type ExportManifest
@@ -120,6 +121,7 @@ export async function createSupportBundle(
     "",
     "manifest.json: schema, app/runtime, included categories and privacy exclusions.",
     "events.jsonl: ordered fixed diagnostic codes, numeric performance metrics and safe error categories.",
+    "summary.json: counts and P50/P95 timings grouped by fixed event code.",
     "environment.json: browser/OS characteristics and optional GPU model (only if opted in).",
     "",
     "Not collected: PDF contents, names, paths, URLs, hashes, comments,",
@@ -130,7 +132,8 @@ export async function createSupportBundle(
   const entries = [
     { name: "README.txt", text: readme },
     { name: "manifest.json", text: JSON.stringify(manifest, null, 2) + "\n" },
-    { name: "events.jsonl", text: events.map((event) => JSON.stringify(event)).join("\n") + "\n" }
+    { name: "events.jsonl", text: events.map((event) => JSON.stringify(event)).join("\n") + "\n" },
+    { name: "summary.json", text: JSON.stringify(summarizeDiagnostics(events), null, 2) + "\n" }
   ];
   if (includeEnvironment) {
     entries.push({
