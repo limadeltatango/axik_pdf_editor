@@ -1,6 +1,6 @@
 {
   "name": "@axik/desktop",
-  "version": "0.0.0-foundation",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
