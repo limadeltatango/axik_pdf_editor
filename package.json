@@ -29,6 +29,7 @@
     "@axik/pdf-writer": "workspace:*",
     "@playwright/test": "^1.56.0",
     "@axik/recovery": "workspace:*",
-    "@axik/print-document": "workspace:*"
+    "@axik/print-document": "workspace:*",
+    "@axik/page-operations": "workspace:*"
   }
 }
