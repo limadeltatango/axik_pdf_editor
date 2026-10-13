@@ -479,14 +479,11 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
           <button onClick={() => void choosePdf()} disabled={loading}>
             {loading ? "Opening…" : "Open PDF"}
           </button>
-          <button onClick={exportOriginal} disabled={!session || dirty || exporting}
-            title={dirty ? "Edited PDF export is pending a validated writer" : "Download a copy of the unchanged original"}>
-            Export original
-          </button>
-          <button onClick={() => void exportEdited()}
-            disabled={!session || !dirty || exporting}
-            title="Download a separate edited PDF with native FreeText callout annotations">
-            {exporting ? "Saving…" : "Export edited PDF"}
+          <button className="primary"
+            onClick={() => dirty ? void exportEdited() : exportOriginal()}
+            disabled={!session || exporting}
+            title="Quick Export downloads a separate PDF copy; it never overwrites the source">
+            {exporting ? "Exporting…" : "Quick Export"}
           </button>
           <button
             onClick={() => void saveAsFile()}
