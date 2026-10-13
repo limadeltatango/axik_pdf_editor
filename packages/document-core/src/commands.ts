@@ -80,7 +80,9 @@ export function redo(state: EditorState): EditorState {
 }
 
 export function hasEdits(state: EditorState): boolean {
-  return state.annotations.length > 0 || state.revision > 0;
+  // Imported annotations are part of the persisted PDF, not unsaved edits.
+  // Only explicit user mutations make a document dirty.
+  return state.revision > 0;
 }
 
 /** Returns the persisted content, without transient undo history. */
