@@ -6,3 +6,5 @@ export {
 } from "./export";
 export type { ExportOptions, SupportBundle } from "./export";
 export { encodeDiagnosticZip } from "./zip";
+export { summarizeDiagnostics } from "./summary";
+export type { DiagnosticSummary, TimingSummary } from "./summary";
