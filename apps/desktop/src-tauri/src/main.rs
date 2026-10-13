@@ -1,3 +1,4 @@
+mod native_files;
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{fs, io::Write, path::Path, time::{Duration, SystemTime}};
@@ -63,7 +64,13 @@ fn open_print_ready_pdf(app: tauri::AppHandle, pdf_data: Vec<u8>) -> Result<(), 
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![open_print_ready_pdf])
+        .manage(native_files::NativeDocumentRegistry::default())
+        .invoke_handler(tauri::generate_handler![
+            open_print_ready_pdf,
+            native_files::open_native_pdf,
+            native_files::save_native_pdf,
+            native_files::save_native_pdf_as
+        ])
         .run(tauri::generate_context!())
         .expect("unable to start Axik PDF Editor");
 }
