@@ -442,3 +442,7 @@ export async function exportEditedPdf(
     warnings: [...new Set(warnings)]
   };
 }
+
+export {readEditableAnnotations} from "./read-annotations";
+export {planAnnotationEdits} from "./diff-annotations";
+export type {PlannedAnnotationEdits} from "./diff-annotations";
