@@ -149,13 +149,16 @@ export function PageCanvas({
           aria-label="Page annotation overlay"
         >
           {annotations.filter((annotation) => annotation.pageIndex === pageIndex).map((annotation) => {
+            // PDF.js already paints imported native appearances underneath.
+            // Keep the edit handle faint until the document is exported again.
+            const imported=Boolean(annotation.sourceName);
             if (annotation.kind === "text") {
               const rect = transformedRect(viewport.transform, annotation.box);
               const selected = selectedAnnotationId === annotation.id;
               return (
                 <g key={annotation.id}
                   onClick={event => {event.stopPropagation();onSelect(annotation.id);}}
-                  className="annotation-mark">
+                  className="annotation-mark" opacity={imported ? 0.12 : 1}>
                   <rect x={rect.x} y={rect.y}
                     width={rect.width} height={rect.height}
                     fill="transparent"
@@ -184,7 +187,7 @@ export function PageCanvas({
               <g key={annotation.id}
                 onClick={(event) => { event.stopPropagation(); onSelect(annotation.id); }}
                 className="annotation-mark"
-                opacity={annotation.style.opacity}
+                opacity={imported ? 0.12 : annotation.style.opacity}
               >
                 <polyline points={leaderCoordinates(annotation.leader, viewport.transform)}
                   fill="none" stroke={annotation.style.stroke}
