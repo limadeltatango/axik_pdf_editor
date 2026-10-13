@@ -78,18 +78,34 @@ export async function saveSession(snapshot: StoredDiagnosticSession): Promise<vo
 export async function readSessions(): Promise<StoredDiagnosticSession[]> {
   const database = await openDatabase();
   try {
-    const results = await new Promise<unknown[]>((resolve, reject) => {
-      const transaction = database.transaction(OBJECT_STORE, "readonly");
-      const request = transaction.objectStore(OBJECT_STORE).getAll();
-      request.onsuccess = () => resolve(request.result as unknown[]);
-      request.onerror = () => reject(request.error ?? new Error("Diagnostics read failed."));
-      transaction.onabort = () => reject(transaction.error ?? new Error("Diagnostics read aborted."));
+    // Read and prune in one transaction. This also expires old history when
+    // collection has been disabled and no new writes are scheduled.
+    return await new Promise<StoredDiagnosticSession[]>((resolve, reject) => {
+      const transaction = database.transaction(OBJECT_STORE, "readwrite");
+      const store = transaction.objectStore(OBJECT_STORE);
+      let kept: StoredDiagnosticSession[] = [];
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const all = request.result as unknown[];
+        const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        kept = all.filter(isSession)
+          .filter((session) => Date.parse(session.updatedAt) >= cutoff)
+          .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+          .slice(0, MAX_STORED_SESSIONS);
+        const keys = new Set(kept.map((session) => session.sessionId));
+        for (const raw of all) {
+          if (raw && typeof raw === "object") {
+            const id = (raw as {sessionId?: unknown}).sessionId;
+            if (typeof id === "string" && !keys.has(id)) {
+              store.delete(id);
+            }
+          }
+        }
+      };
+      transaction.oncomplete = () => resolve(kept);
+      transaction.onerror = () => reject(transaction.error ?? new Error("Diagnostics read/prune failed."));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Diagnostics read/prune aborted."));
     });
-    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    return results.filter(isSession)
-      .filter((session) => Date.parse(session.updatedAt) >= cutoff)
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-      .slice(0, MAX_STORED_SESSIONS);
   } finally {
     database.close();
   }
