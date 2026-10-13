@@ -240,3 +240,14 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   touch-action:none;cursor:crosshair;border:1px solid #68839f;
   border-radius:5px;background:#fff;user-select:none}
 .signature-detail {border-top:1px solid #3b5166;padding:10px 0}
+
+.search-panel {width:min(760px,96vw);max-height:90vh;overflow:auto;
+  padding:23px;background:#20334a;border:1px solid #53728f;
+  border-radius:12px;box-shadow:0 28px 80px #000a}
+.search-controls {display:flex;gap:10px;margin:18px 0}
+.search-controls input {flex:1;min-width:120px;background:#142338;
+  color:#fff;border:1px solid #5a7795;border-radius:6px;padding:10px 12px}
+.search-results {max-height:48vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.search-result {display:flex;flex-direction:column;text-align:left;gap:6px;
+  width:100%;background:#2b435c}
+.search-result span {font-size:12px;color:#d0e0f0;overflow-wrap:anywhere}
