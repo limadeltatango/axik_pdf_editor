@@ -36,7 +36,16 @@ export interface StickyNoteAnnotation extends AnnotationBase {
   position: Point;
 }
 
-export type Annotation = CalloutAnnotation | StickyNoteAnnotation;
+/** Native PDF /Subtype /FreeText without callout leader. */
+export interface TextBoxAnnotation extends AnnotationBase {
+  kind: "text";
+  intent: "FreeText";
+  text: string;
+  box: Rect;
+  style: AnnotationStyle;
+}
+
+export type Annotation = CalloutAnnotation | StickyNoteAnnotation | TextBoxAnnotation;
 export type AnnotationKind = Annotation["kind"];
 
 const MAX_ANNOTATION_TEXT = 20_000;
@@ -67,7 +76,11 @@ export function validateAnnotation(value: Annotation): Annotation {
     if (!isPoint(value.position)) throw new RangeError("Invalid note position.");
     return value;
   }
-  if (value.kind !== "callout" || value.intent !== "FreeTextCallout" ||
+  if (value.kind === "text") {
+    if (value.intent !== "FreeText" || !isRect(value.box)) {
+      throw new RangeError("Invalid editable text box.");
+    }
+  } else if (value.kind !== "callout" || value.intent !== "FreeTextCallout" ||
       !isRect(value.box) || ![2, 3].includes(value.leader.length) ||
       !value.leader.every(isPoint) ||
       !["none", "open", "closed"].includes(value.arrowHead)) {
@@ -158,4 +171,37 @@ export function calloutToStandardPayload(callout: CalloutAnnotation): StandardCa
     ],
     textBoxRect
   };
+}
+
+
+/** Create a plain, movable FreeText markup box; this does NOT rewrite existing text streams. */
+export function newTextBox({
+  id, pageIndex, location, pageBounds, text="New text",
+  now=new Date()
+}:{
+  id:string;pageIndex:number;location:Point;pageBounds:Rect;
+  text?:string;now?:Date
+}):TextBoxAnnotation {
+  if(!isRect(pageBounds)||!isPoint(location)){
+    throw new RangeError("Invalid text box placement.");
+  }
+  const width=Math.min(240,pageBounds.width);
+  const height=Math.min(70,pageBounds.height);
+  const box:Rect={
+    x:clamp(location.x,pageBounds.x,pageBounds.x+pageBounds.width-width),
+    y:clamp(location.y-height,pageBounds.y,pageBounds.y+pageBounds.height-height),
+    width,height
+  };
+  const time=now.toISOString();
+  const annotation:TextBoxAnnotation={
+    id,pageIndex,kind:"text",intent:"FreeText",text,box,
+    style:{
+      ...DEFAULT_CALLOUT_STYLE,
+      stroke:"#152539",fill:"#ffffff",
+      fontSize:14,lineWidth:0.5
+    },
+    createdAt:time,updatedAt:time
+  };
+  validateAnnotation(annotation);
+  return annotation;
 }
