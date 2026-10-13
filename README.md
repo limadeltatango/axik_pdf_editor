@@ -71,3 +71,26 @@ For the extension, the future validated workflow will load `apps/chromium-extens
 ## Development boundaries
 
 No Weave jobs, AI agents, local LLMs, runners, GitHub Actions, builds or tests were started while producing this code foundation. The foundation is isolated in its own review branch, and the specification is tracked separately. A successful GitHub commit is not an indication of successful execution or interoperability.
+
+
+## Save workflow (alpha — branch `feat/apdf-45-save-workflow`)
+
+**Quick Export** remains the recommended, non-destructive fast markup workflow.
+The new file-saving foundation offers **Save As** (a new empty destination
+selected using the Chromium File System Access picker) and **Save** (deliberate
+overwrite of a PDF originally opened using a trusted writable file picker).
+
+For Save, the alpha requires an additional one-time-per-save backup picker.
+It writes and verifies a separate original-PDF backup, checks that the original
+file did not change externally, then overwrites and verifies the edited PDF. If
+a file was opened via drag/drop, normal file input, or downloaded link there is
+no trusted writable source handle: Save stays disabled, while Quick Export and
+Save As remain options. In environments without File System Access picker support,
+Quick Export remains the fallback. A native Windows save service with transparent
+backup retention is a subsequent APDF-45 milestone.
+
+**Limitations:** This branch is not yet accepted. User-picked handle permissions,
+transaction semantics, backup/recovery and WebView2/Chrome/Edge behavior require
+target-platform testing before using source overwrites on production documents.
+Native PDF callouts imported from disk remain visible but not yet editable in
+the Axik sidebar after Save; future content editing will address that.
