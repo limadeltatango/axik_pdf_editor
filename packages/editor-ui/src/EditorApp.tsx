@@ -12,6 +12,7 @@ import { exportEditedPdf } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageCanvas } from "./PageCanvas";
 import { PrintPlanPanel } from "./PrintPlanPanel";
+import { PageOperationsPanel } from "./PageOperationsPanel";
 import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
@@ -69,6 +70,7 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const [showPrintPlan, setShowPrintPlan] = useState(false);
+  const [showPageOperations, setShowPageOperations] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [journalStatus, setJournalStatus] = useState("No draft edits");
 
@@ -508,6 +510,9 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
             diagnostics.record("print", "PRINT_PLAN_OPEN");
             setShowPrintPlan(true);
           }} disabled={!session}>Print</button>
+          <button onClick={()=>setShowPageOperations(true)} disabled={!session}>
+            Pages
+          </button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
@@ -631,6 +636,10 @@ export function EditorApp({ environment, requestedFile }: EditorAppProps) {
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
         onClose={() => setShowPrintPlan(false)} />}
+      {showPageOperations && session && <PageOperationsPanel
+        pdf={session.pdf} source={session.source}
+        annotations={editor.annotations} name={session.name}
+        onClose={()=>setShowPageOperations(false)} />}
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
       } version="0.0.1" onClose={() => setShowDiagnostics(false)} />}
