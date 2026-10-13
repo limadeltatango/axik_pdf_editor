@@ -3,6 +3,7 @@ import {
   newCallout, pdfToViewport, transformedRect, viewportToPdf,
   type Annotation, type CalloutAnnotation, type Matrix, type Point
 } from "@axik/document-core";
+import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
 
 export interface PageCanvasProps {
@@ -58,6 +59,10 @@ export function PageCanvas({
       canvas.style.width = String(view.width) + "px";
       canvas.style.height = String(view.height) + "px";
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const renderStarted = performance.now();
+      diagnostics.record("render", "PDF_RENDER_START", "info", {
+        pageIndex, zoomPercent: zoom * 100
+      });
       const task = page.render({
         canvas,
         canvasContext: context,
@@ -71,8 +76,22 @@ export function PageCanvas({
       }
       try {
         await task.promise;
+        if (!cancelled) {
+          diagnostics.record("render", "PDF_RENDER_OK", "info", {
+            pageIndex, zoomPercent: zoom * 100, durationMs: performance.now() - renderStarted
+          });
+        }
       } catch (reason) {
-        if (!cancelled) throw reason;
+        if (cancelled) {
+          diagnostics.record("render", "PDF_RENDER_CANCELLED", "info", {
+            pageIndex, durationMs: performance.now() - renderStarted
+          });
+        } else {
+          diagnostics.recordError("render", "PDF_RENDER_FAILED", reason, {
+            pageIndex, durationMs: performance.now() - renderStarted
+          });
+          throw reason;
+        }
       }
     })().catch((reason: unknown) => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : "Page render failed.");
