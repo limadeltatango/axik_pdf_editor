@@ -3,13 +3,18 @@ import { diagnostics } from "@axik/diagnostics";
 import { normalizeRotation, type Annotation, type PageGeometry } from "@axik/document-core";
 import {
   DEFAULT_MARGINS, LETTER_PORTRAIT, LEGAL_PORTRAIT,
-  TABLOID_PORTRAIT, planFixedMedia, printPlanSummary,
-  type PhysicalMedia, type PrintPlan, type SourcePage
+  TABLOID_PORTRAIT, ARCH_C_PORTRAIT, ARCH_D_PORTRAIT, ARCH_E_PORTRAIT,
+  planFixedMedia, printPlanSummary, checkPrinterMedia,
+  type PhysicalMedia, type PrintPlan, type SourcePage,
+  type InstalledPrinter, type DriverPrinterCapabilities
 } from "@axik/print-plan";
 import { preparePrintDocument } from "./prepare-print";
 import type { PdfDocument } from "./pdf";
 
-const MEDIA: PhysicalMedia[] = [LETTER_PORTRAIT, LEGAL_PORTRAIT, TABLOID_PORTRAIT];
+const MEDIA: PhysicalMedia[] = [
+  LETTER_PORTRAIT, LEGAL_PORTRAIT, TABLOID_PORTRAIT,
+  ARCH_C_PORTRAIT, ARCH_D_PORTRAIT, ARCH_E_PORTRAIT
+];
 
 /**
  * The first REAL print capability: prepare a fixed-stock PDF with every sheet
@@ -18,7 +23,8 @@ const MEDIA: PhysicalMedia[] = [LETTER_PORTRAIT, LEGAL_PORTRAIT, TABLOID_PORTRAI
  * physical print completion. It gives a practical mixed-orientation workaround.
  */
 export function PrintPlanPanel({
-  pdf, source, annotations, name, onClose, onNativePrint
+  pdf, source, annotations, name, onClose, onNativePrint,
+  onPrinterList, onPrinterCapabilities
 }: {
   pdf: PdfDocument;
   source: Uint8Array;
@@ -26,6 +32,8 @@ export function PrintPlanPanel({
   name: string;
   onClose: () => void;
   onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
+  onPrinterList?: ()=>Promise<InstalledPrinter[]>;
+  onPrinterCapabilities?: (printerName:string)=>Promise<DriverPrinterCapabilities>;
 }) {
   const [medium, setMedium] = useState(MEDIA[0]!.id);
   const [scale, setScale] = useState<"shrink-to-fit" | "actual-size">("shrink-to-fit");
@@ -36,6 +44,11 @@ export function PrintPlanPanel({
   const [count, setCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [printers, setPrinters] = useState<InstalledPrinter[]>();
+  const [selectedPrinter,setSelectedPrinter]=useState("");
+  const [selectedCapabilities,setSelectedCapabilities]=useState<DriverPrinterCapabilities>();
+  const [printerError,setPrinterError]=useState<string>();
+  const [printerBusy,setPrinterBusy]=useState(false);
   const [prepared, setPrepared] = useState<{
     url: string;
     mode: "vector" | "raster";
@@ -47,6 +60,39 @@ export function PrintPlanPanel({
   useEffect(() => () => {
     if(prepared?.url)URL.revokeObjectURL(prepared.url);
   }, [prepared?.url]);
+
+  useEffect(()=>{
+    if(!onPrinterList)return;
+    let live=true;
+    onPrinterList().then(value=>{
+      if(live)setPrinters(value);
+    }).catch(()=>{
+      if(live)setPrinterError("Installed printer discovery failed. You may still prepare a PDF.");
+    });
+    return ()=>{live=false};
+  },[onPrinterList]);
+
+  useEffect(()=>{
+    if(!selectedPrinter || !onPrinterCapabilities){
+      setSelectedCapabilities(undefined);
+      setPrinterError(undefined);
+      return;
+    }
+    let live=true;
+    setPrinterBusy(true);
+    setPrinterError(undefined);
+    setSelectedCapabilities(undefined);
+    onPrinterCapabilities(selectedPrinter).then(result=>{
+      if(live)setSelectedCapabilities(result);
+    }).catch(()=>{
+      if(live)setPrinterError(
+        "The driver did not provide media capability information. Verify the paper in the system print dialog."
+      );
+    }).finally(()=>{
+      if(live)setPrinterBusy(false);
+    });
+    return ()=>{live=false};
+  },[selectedPrinter,onPrinterCapabilities]);
 
   useEffect(() => {
     // A prepared file is invalid as soon as any physical print option changes.
@@ -82,6 +128,10 @@ export function PrintPlanPanel({
   let plan: PrintPlan | undefined;
   let planError: string | undefined;
   const media = MEDIA.find(paper => paper.id === medium) ?? MEDIA[0]!;
+  const selectedCheck=selectedCapabilities
+    ? checkPrinterMedia(media,duplex,selectedCapabilities) : undefined;
+  const printerMismatch=Boolean(selectedPrinter && selectedCheck &&
+    (selectedCheck.paper==="unsupported" || selectedCheck.duplex==="unsupported"));
   try {
     if (pages) plan = planFixedMedia({
       pages, media, margins: DEFAULT_MARGINS, scaling: scale, duplex
@@ -180,6 +230,36 @@ export function PrintPlanPanel({
           </select>
         </label>
       </div>
+      {onPrinterList && <div className="printer-capabilities">
+        <h3>Windows printer capability check</h3>
+        <p className="muted">Optional preflight. Axik reads installed driver capabilities;
+          it does not choose the printer for the external PDF viewer.</p>
+        <label>Check this installed printer:
+          <select value={selectedPrinter} disabled={printerBusy}
+            onChange={event=>setSelectedPrinter(event.target.value)}>
+            <option value="">No printer selected</option>
+            {(printers??[]).map(printer=><option value={printer.name}
+              key={printer.name}>{printer.name}{printer.isNetwork?" (network)":""}</option>)}
+          </select>
+        </label>
+        {printerBusy && <p role="status">Reading printer driver capabilities…</p>}
+        {printerError && <p className="diagnostics-warning" role="status">{printerError}</p>}
+        {selectedCheck && <p role="status" className={
+          printerMismatch?"diagnostics-warning":"muted"
+        }>
+          Paper: {selectedCheck.paper};
+          duplex: {selectedCheck.duplex}.
+          {" "+selectedCheck.note}
+        </p>}
+        {selectedCapabilities && <p className="muted">
+          {selectedCapabilities.papers.length} advertised media size(s);
+          driver duplex: {selectedCapabilities.duplexAdvertised?"yes":"no"}.
+          This does not confirm loaded trays or physical output.
+        </p>}
+        {!printers?.length && !printerError && <p className="muted">
+          No installed printers found, or discovery is pending.
+        </p>}
+      </div>}
       {!pages && !error && <p role="status">Reading page geometry: {count} / {pdf.numPages}</p>}
       {(error || planError) && <p role="alert" className="diagnostics-warning">{error || planError}</p>}
       {plan && <>
@@ -224,7 +304,9 @@ export function PrintPlanPanel({
             target="_blank" rel="noopener noreferrer">
             Open PDF to Print
           </a>
-          {onNativePrint && <button onClick={async()=>{
+          {onNativePrint && <button disabled={printerMismatch}
+            title={printerMismatch?"Printer capabilities do not support these selected settings":""}
+            onClick={async()=>{
             try{
               await onNativePrint(prepared.bytes);
               setProgress("Print-ready PDF opened in the system viewer. Use its Print dialog.");

@@ -6,6 +6,7 @@ on:
       - feat/prototype-alpha-20261013
       - feat/apdf-45-save-workflow
       - feat/apdf-core-editor-print-text
+      - feat/apdf-19-printer-capabilities
   workflow_dispatch:
 
 permissions:

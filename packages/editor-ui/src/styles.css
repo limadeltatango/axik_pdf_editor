@@ -224,3 +224,11 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   padding:7px 9px; border-bottom:1px solid #304761; }
 .page-operation-row span { flex:1;font-size:12px; }
 .page-operation-row button { min-width:34px; }
+
+.printer-capabilities { padding:12px 14px; margin:12px 0;
+  border:1px solid #476280; border-radius:7px;background:#1b2c41; }
+.printer-capabilities h3 {font-size:14px;margin:0 0 8px}
+.printer-capabilities label {display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap;font-size:12px}
+.printer-capabilities select {border:1px solid #5b7794;background:#28415b;
+  color:#fff;border-radius:5px;padding:7px;max-width:100%}

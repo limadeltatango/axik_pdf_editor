@@ -25,6 +25,10 @@ createRoot(mount).render(
         "save_native_pdf_as",{editedBytes:Array.from(bytes),suggestedName}
       );
     }}
+    onPrinterList={()=>invoke("list_native_printers")}
+    onPrinterCapabilities={(printerName:string)=>
+      invoke("get_native_printer_capabilities",{printerName})
+    }
     onNativePrint={async bytes=>{
     if(bytes.byteLength > 100*1024*1024){
       throw new RangeError("Prepared print PDF exceeds Windows handoff limit.");
