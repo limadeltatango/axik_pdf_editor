@@ -18,13 +18,14 @@ const MEDIA: PhysicalMedia[] = [LETTER_PORTRAIT, LEGAL_PORTRAIT, TABLOID_PORTRAI
  * physical print completion. It gives a practical mixed-orientation workaround.
  */
 export function PrintPlanPanel({
-  pdf, source, annotations, name, onClose
+  pdf, source, annotations, name, onClose, onNativePrint
 }: {
   pdf: PdfDocument;
   source: Uint8Array;
   annotations: readonly Annotation[];
   name: string;
   onClose: () => void;
+  onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
 }) {
   const [medium, setMedium] = useState(MEDIA[0]!.id);
   const [scale, setScale] = useState<"shrink-to-fit" | "actual-size">("shrink-to-fit");
@@ -40,6 +41,7 @@ export function PrintPlanPanel({
     mode: "vector" | "raster";
     warnings: readonly string[];
     plan: PrintPlan;
+    bytes: Uint8Array;
   }>();
 
   useEffect(() => () => {
@@ -120,7 +122,7 @@ export function PrintPlanPanel({
       bytes.set(result.bytes);
       const url=URL.createObjectURL(new Blob([bytes.buffer],{type:"application/pdf"}));
       setPrepared({
-        url,mode:result.mode,
+        url,mode:result.mode,bytes,
         warnings:result.warnings,plan:result.plan
       });
       diagnostics.record("print","PRINT_READY_OK","info",{
@@ -222,6 +224,17 @@ export function PrintPlanPanel({
             target="_blank" rel="noopener noreferrer">
             Open PDF to Print
           </a>
+          {onNativePrint && <button onClick={async()=>{
+            try{
+              await onNativePrint(prepared.bytes);
+              setProgress("Print-ready PDF opened in the system viewer. Use its Print dialog.");
+            }catch(reason){
+              setError(reason instanceof Error ? reason.message :
+                "Could not open the system PDF viewer.");
+            }
+          }}>
+            Open in Windows PDF Viewer
+          </button>}
         </>}
       </div>
       {progress && <p role="status" className="muted">{progress}</p>}
