@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type MouseEvent } from "react";
 import {
-  newCallout, newTextBox, pdfToViewport, transformedRect, viewportToPdf,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type Matrix, type Point
+  newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Matrix, type Point
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
@@ -10,12 +10,13 @@ export interface PageCanvasProps {
   page: PdfPage | undefined;
   pageIndex: number;
   zoom: number;
-  tool: "select" | "callout" | "text";
+  tool: "select" | "callout" | "text" | "note";
   annotations: readonly Annotation[];
   selectedAnnotationId?: string;
   onSelect: (id: string) => void;
   onAddCallout: (annotation: CalloutAnnotation) => void;
   onAddText: (annotation: TextBoxAnnotation) => void;
+  onAddNote: (annotation: StickyNoteAnnotation) => void;
 }
 
 interface ViewportInfo {
@@ -33,7 +34,7 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 
 export function PageCanvas({
   page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout, onAddText
+  onSelect, onAddCallout, onAddText, onAddNote
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
@@ -104,7 +105,7 @@ export function PageCanvas({
   }, [page, zoom]);
 
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
-    if (!page || !viewport || (tool !== "callout" && tool !== "text")) return;
+    if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const tip = viewportToPdf(viewport.transform, {
       x: event.clientX - bounds.left, y: event.clientY - bounds.top
@@ -116,9 +117,13 @@ export function PageCanvas({
         onAddCallout(newCallout({
           id: crypto.randomUUID(),pageIndex,tip,pageBounds
         }));
-      }else{
+      }else if(tool==="text"){
         onAddText(newTextBox({
           id: crypto.randomUUID(),pageIndex,location:tip,pageBounds
+        }));
+      }else{
+        onAddNote(newStickyNote({
+          id:crypto.randomUUID(),pageIndex,position:tip
         }));
       }
     } catch (reason) {
@@ -140,7 +145,7 @@ export function PageCanvas({
           height={viewport.height}
           viewBox={"0 0 " + viewport.width + " " + viewport.height}
           onClick={handlePageClick}
-          style={{ cursor: tool === "callout" || tool === "text" ? "crosshair" : "default" }}
+          style={{ cursor: tool !== "select" ? "crosshair" : "default" }}
           aria-label="Page annotation overlay"
         >
           {annotations.filter((annotation) => annotation.pageIndex === pageIndex).map((annotation) => {
