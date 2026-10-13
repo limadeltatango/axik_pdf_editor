@@ -9,6 +9,7 @@ on:
       - feat/apdf-19-printer-capabilities
       - feat/apdf-22-reopen-edit-annotations
       - feat/apdf-32-visual-signatures
+      - feat/apdf-13-search-navigation
   workflow_dispatch:
 
 permissions:
