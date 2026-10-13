@@ -57,7 +57,8 @@ function collectEnvironment(withGpu: boolean): SafeEnvironment {
       info.webgl = "unavailable";
       return info;
     }
-    info.webgl = gl instanceof WebGL2RenderingContext ? "webgl2" : "webgl";
+    info.webgl = typeof WebGL2RenderingContext !== "undefined" &&
+      gl instanceof WebGL2RenderingContext ? "webgl2" : "webgl";
     try {
       const ext = gl.getExtension("WEBGL_debug_renderer_info");
       if (ext) {
