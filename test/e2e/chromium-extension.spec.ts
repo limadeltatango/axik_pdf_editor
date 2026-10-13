@@ -45,7 +45,7 @@ test("real Chromium extension opens, annotates, exports and reopens a PDF", asyn
     await expect(tab.getByLabel("Callout text")).toBeVisible();
     await tab.getByLabel("Callout text").fill("Check partition detail A-101");
     const downloadPromise = tab.waitForEvent("download");
-    await tab.getByRole("button", { name: "Export edited PDF" }).click();
+    await tab.getByRole("button", { name: "Quick Export" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toContain("-axik-edited.pdf");
     await download.saveAs(outputPath);
