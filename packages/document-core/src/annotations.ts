@@ -205,3 +205,19 @@ export function newTextBox({
   validateAnnotation(annotation);
   return annotation;
 }
+
+
+export function newStickyNote({
+  id,pageIndex,position,text="Add a note",now=new Date()
+}:{
+  id:string;pageIndex:number;position:Point;text?:string;now?:Date
+}):StickyNoteAnnotation{
+  if(!isPoint(position))throw new RangeError("Invalid comment position.");
+  const time=now.toISOString();
+  const note:StickyNoteAnnotation={
+    id,pageIndex,position,text,kind:"note",
+    createdAt:time,updatedAt:time
+  };
+  validateAnnotation(note);
+  return note;
+}
