@@ -37,6 +37,10 @@ jobs:
         run: pnpm build:extension
       - name: Validate generated Manifest V3 package
         run: node tools/check-extension-package.mjs
+      - name: Install Chromium for browser integration test
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test extension in actual Chromium
+        run: pnpm test:e2e
       - name: Package prototype
         run: |
           cd apps/chromium-extension/dist
