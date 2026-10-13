@@ -23,12 +23,13 @@ const MEDIA: PhysicalMedia[] = [
  * physical print completion. It gives a practical mixed-orientation workaround.
  */
 export function PrintPlanPanel({
-  pdf, source, annotations, name, onClose, onNativePrint,
+  pdf, source, annotations, importedAnnotations, name, onClose, onNativePrint,
   onPrinterList, onPrinterCapabilities
 }: {
   pdf: PdfDocument;
   source: Uint8Array;
   annotations: readonly Annotation[];
+  importedAnnotations?: readonly Annotation[];
   name: string;
   onClose: () => void;
   onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
@@ -165,7 +166,7 @@ export function PrintPlanPanel({
       const result=await preparePrintDocument(source,annotations,{
         media,margins:DEFAULT_MARGINS,scaling:scale,duplex
       },{
-        rasterDpi,
+        rasterDpi,importedAnnotations,
         onProgress:(current,total)=>setProgress("Rendering print pages "+current+" / "+total)
       });
       const bytes=new Uint8Array(result.bytes.byteLength);
