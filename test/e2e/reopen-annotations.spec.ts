@@ -23,6 +23,7 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
     const tab=await context.newPage();
     const errors:string[]=[];
     tab.on("pageerror",reason=>errors.push(reason.name));
+    tab.on("dialog",dialog=>{void dialog.accept()});
     await tab.goto("chrome-extension://"+new URL(worker.url()).hostname+"/viewer.html");
     await tab.locator('input[type="file"]').setInputFiles(source);
     await expect(tab.getByRole("button",{name:"Callout"})).toBeEnabled({timeout:20_000});
@@ -36,9 +37,11 @@ test("reopen and edit an existing Axik callout without duplicating it",async()=>
 
     // Reopen the saved PDF and edit the native annotation from the Axik sidebar.
     await tab.locator('input[type="file"]').setInputFiles(draft);
-    await expect(tab.getByText("Original coordination request",{exact:true}))
-      .toBeVisible({timeout:20_000});
-    await tab.getByText("Original coordination request",{exact:true}).click();
+    const importedItem=tab.locator(".comment-item").filter({
+      hasText:"Original coordination request"
+    });
+    await expect(importedItem).toBeVisible({timeout:20_000});
+    await importedItem.click();
     await expect(tab.getByLabel("Callout text")).toBeVisible();
     await tab.getByLabel("Callout text").fill("Approved revised coordination request");
     const secondDownload=tab.waitForEvent("download");
