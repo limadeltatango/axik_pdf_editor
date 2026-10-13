@@ -310,8 +310,17 @@ export function EditorApp({
 
   function handleChooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
-    if (file) void openFile(file);
     event.currentTarget.value = "";
+    if (!file) return;
+    // Windows WebView2 can produce duplicated MIME/extension filters from
+    // accept="application/pdf,.pdf". The desktop dialog is intentionally
+    // unfiltered; validate the selected file after Windows returns it.
+    if (!file.name.toLowerCase().endsWith(".pdf") &&
+        file.type.toLowerCase() !== "application/pdf") {
+      setError("Please select an existing PDF document (.pdf).");
+      return;
+    }
+    void openFile(file);
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
@@ -670,7 +679,7 @@ export function EditorApp({
           </button>
           <button onClick={() => setShowDiagnostics(true)}>Diagnostics</button>
         </div>
-        <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" hidden onChange={handleChooseFile} />
+        <input ref={fileInputRef} type="file" accept={environment === "desktop" ? undefined : ".pdf"} hidden onChange={handleChooseFile} />
       </header>
       <div className="toolstrip" role="toolbar" aria-label="PDF editing tools">
         <button aria-pressed={tool === "select"} disabled={!session || documentBusy}
@@ -713,10 +722,11 @@ export function EditorApp({
             <h1>Your documents, without the overhead.</h1>
             <p>Open a PDF to view it, navigate pages and try the local callout tool.</p>
             <button className="primary" onClick={() => void choosePdf()}>Choose a PDF</button>
-            <p className="muted">Open PDF uses the regular file picker and leaves the original untouched.
-              Use Open for Save (Windows desktop) only when you specifically need
-              in-place Save with an automatic backup. Quick Export and Save As
-              remain available for ordinary files.</p>
+            <p className="muted">Open PDF uses an unrestricted Windows file picker
+              to avoid a WebView2 PDF-filter problem. Select an existing .pdf file;
+              Axik checks the file type after selection. If the Windows dialog
+              still prevents selecting a file, try Open for Save… or dragging a
+              PDF into this window. Quick Export never overwrites the original.</p>
             <p className="warning-note">This is an early foundation. Editing, intelligent printing, signing and
               secure redaction are not yet complete and must not be relied on for production work.</p>
           </section>}
