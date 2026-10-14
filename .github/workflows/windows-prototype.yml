@@ -10,6 +10,7 @@ on:
       - feat/apdf-22-reopen-edit-annotations
       - fix/apdf-desktop-open-pdf-hotfix
       - fix/apdf-52-win32-open-dialog-filter
+      - feat/apdf-usability-view-modes-markup-drag
   workflow_dispatch:
 
 permissions:
