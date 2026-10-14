@@ -281,7 +281,7 @@ export function DocumentViewport(props:DocumentViewportProps){
         {events.tool==="callout"?"Click where the callout arrow should point.":
           events.tool==="text"?"Click to place editable text.":
           events.tool==="note"?"Click to leave a comment.":
-          "Drag a markup box to move it; the arrow tip stays fixed. Arrow keys nudge a focused box."}
+          "Select a markup, then drag its box or corner handles to move/resize. Callout tip and elbow grips move independently. Arrow keys nudge focused grips."}
       </p>
     </div>
   </div>;
