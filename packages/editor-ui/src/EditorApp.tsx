@@ -371,6 +371,20 @@ export function EditorApp({
     }
   };
 
+  function moveMarkupBox(annotation: CalloutAnnotation | TextBoxAnnotation) {
+    try {
+      setEditor(previous=>applyCommand(previous,{
+        type:"replace",annotation
+      }));
+      setSelectedId(annotation.id);
+      diagnostics.record("annotation","ANNOTATION_UPDATED","info",{
+        pageIndex:annotation.pageIndex
+      });
+    }catch(reason){
+      setError(pdfError(reason));
+    }
+  }
+
   const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
   const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
 
@@ -737,7 +751,8 @@ export function EditorApp({
                 tool={tool}
                 annotations={editor.annotations}
                 selectedAnnotationId={selectedId}
-                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
+                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText}
+                onAddNote={addNote} onMoveBox={moveMarkupBox}
               />
               <p className="workspace-tip">
                 {tool === "callout" ? "Click where the callout arrow should point." :
