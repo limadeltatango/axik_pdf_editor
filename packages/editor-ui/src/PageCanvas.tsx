@@ -6,6 +6,7 @@ import {
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
+import { budgetCanvas } from "./render-sizing";
 
 export interface PageCanvasProps {
   page: PdfPage | undefined;
@@ -64,14 +65,15 @@ export function PageCanvas({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const view = page.getViewport({ scale: zoom });
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const {ratio,backingWidth,backingHeight}=budgetCanvas(
+        view.width,view.height,window.devicePixelRatio||1
+      );
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("Canvas 2D is unavailable.");
-      canvas.width = Math.max(1, Math.floor(view.width * ratio));
-      canvas.height = Math.max(1, Math.floor(view.height * ratio));
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
       canvas.style.width = String(view.width) + "px";
       canvas.style.height = String(view.height) + "px";
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
       const renderStarted = performance.now();
       diagnostics.record("render", "PDF_RENDER_START", "info", {
         pageIndex, zoomPercent: zoom * 100
@@ -80,6 +82,7 @@ export function PageCanvas({
         canvas,
         canvasContext: context,
         viewport: view,
+        transform:[ratio,0,0,ratio,0,0],
         background: "rgb(255,255,255)"
       });
       cancelRender = () => task.cancel();
