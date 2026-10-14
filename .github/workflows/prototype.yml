@@ -11,6 +11,7 @@ on:
       - fix/apdf-desktop-open-pdf-hotfix
       - fix/apdf-52-win32-open-dialog-filter
       - feat/apdf-usability-view-modes-markup-drag
+      - feat/apdf-56-markup-controls-performance
   workflow_dispatch:
 
 permissions:
