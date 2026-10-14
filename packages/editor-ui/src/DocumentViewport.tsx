@@ -113,13 +113,15 @@ export function DocumentViewport(props:DocumentViewportProps){
     ...events
   }=props;
   const rootRef=useRef<HTMLDivElement>(null);
-  const scrollFrame=useRef<number>();
+  const scrollFrame=useRef<number | undefined>(undefined);
+  const previousZoom=useRef(zoom);
   const continuous=isContinuous(mode),twoUp=isTwoUp(mode);
 
+  const singleAnchor=continuous?0:pageNumber;
   const groups=useMemo(()=>{
     if(continuous)return groupVisiblePages(pdf.numPages,mode,coverAlone);
-    return [spreadForPage(pageNumber,pdf.numPages,mode,coverAlone)];
-  },[pdf,mode,coverAlone,continuous,pageNumber]);
+    return [spreadForPage(singleAnchor,pdf.numPages,mode,coverAlone)];
+  },[pdf,mode,coverAlone,continuous,singleAnchor]);
 
   const firstGroupIndex=useMemo(()=>{
     const i=groups.findIndex(group=>group.includes(pageNumber));
@@ -140,10 +142,13 @@ export function DocumentViewport(props:DocumentViewportProps){
   },[pdf]);
 
   useEffect(()=>{
-    setReferenceSize(s=>({
-      width:s.width/Math.max(.01,props.zoom)*zoom,
-      height:s.height/Math.max(.01,props.zoom)*zoom
-    }));
+    const factor=zoom/Math.max(.01,previousZoom.current);
+    previousZoom.current=zoom;
+    if(Math.abs(factor-1)>0.0001){
+      setReferenceSize(size=>({
+        width:size.width*factor,height:size.height*factor
+      }));
+    }
   },[zoom]);
 
   useEffect(()=>{
