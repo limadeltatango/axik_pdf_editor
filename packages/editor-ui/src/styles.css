@@ -232,3 +232,9 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   flex-wrap:wrap;font-size:12px}
 .printer-capabilities select {border:1px solid #5b7794;background:#28415b;
   color:#fff;border-radius:5px;padding:7px;max-width:100%}
+
+.markup-drag-box { cursor: grab; touch-action: none; }
+.markup-drag-box:active { cursor: grabbing; }
+.markup-drag-box:focus-visible { stroke: #1655ff !important;
+  stroke-width: 3px; outline: none; stroke-dasharray: 6 3; }
+.annotation-layer:has(.markup-drag-box:active) { user-select: none; }
