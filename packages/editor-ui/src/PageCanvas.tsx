@@ -21,6 +21,7 @@ export interface PageCanvasProps {
   onAddNote: (annotation: StickyNoteAnnotation) => void;
   /** Commit after pointer up or keyboard nudge; one Undo entry per move. */
   onMoveBox: (annotation: MovableBox) => void;
+  onRendered?: (pageIndex:number)=>void;
 }
 
 interface ViewportInfo {
@@ -38,7 +39,7 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 
 export function PageCanvas({
   page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout, onAddText, onAddNote, onMoveBox
+  onSelect, onAddCallout, onAddText, onAddNote, onMoveBox,onRendered
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
@@ -96,6 +97,7 @@ export function PageCanvas({
           diagnostics.record("render", "PDF_RENDER_OK", "info", {
             pageIndex, zoomPercent: zoom * 100, durationMs: performance.now() - renderStarted
           });
+          onRendered?.(pageIndex);
         }
       } catch (reason) {
         if (cancelled) {
