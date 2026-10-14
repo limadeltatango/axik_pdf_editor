@@ -49,7 +49,7 @@ export function PageCanvas({
     start:Point;
     annotation:MovableBox;
     bounds:Rect;
-  }>();
+  } | undefined>(undefined);
   const previewFrame = useRef<number | undefined>(undefined);
 
   useEffect(() => {
