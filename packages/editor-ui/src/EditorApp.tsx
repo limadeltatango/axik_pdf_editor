@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
   type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
@@ -54,7 +54,7 @@ interface Session {
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
-const MIN_ZOOM = 0.35;
+const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
 const PREF_KEY="axik-pdf-editor-view-v1";
 
@@ -152,6 +152,26 @@ export function EditorApp({
     setZoomMode("custom");
     setZoom(prev=>Math.min(MAX_ZOOM,
       Math.max(MIN_ZOOM,Math.round((prev+delta)*100)/100)));
+  }
+
+  function handleKeyboardNavigation(event:KeyboardEvent<HTMLElement>){
+    const target=event.target;
+    if(target instanceof HTMLInputElement ||
+       target instanceof HTMLTextAreaElement ||
+       target instanceof HTMLSelectElement ||
+       (target instanceof HTMLElement && target.isContentEditable))return;
+    if(!session?.pdf || documentBusy || event.ctrlKey || event.altKey)return;
+    const pages=session.pdf.numPages;
+    let next:number|undefined;
+    if(event.key==="PageDown"){
+      next=adjacentPage(pageNumber,pages,viewMode,coverAlone,1);
+    }else if(event.key==="PageUp"){
+      next=adjacentPage(pageNumber,pages,viewMode,coverAlone,-1);
+    }else if(event.key==="Home")next=1;
+    else if(event.key==="End")next=pages;
+    if(next===undefined)return;
+    event.preventDefault();
+    goToPage(next);
   }
 
   const fitReferencePage=isContinuous(viewMode)?1:pageNumber;
@@ -702,7 +722,9 @@ export function EditorApp({
   }
 
   return (
-    <main className="editor-root" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <main className="editor-root"
+      onKeyDown={handleKeyboardNavigation}
+      onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       <header className="topbar">
         <div className="app-brand">
           <span className="app-symbol">A</span>
