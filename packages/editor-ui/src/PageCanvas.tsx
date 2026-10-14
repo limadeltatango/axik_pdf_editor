@@ -312,6 +312,56 @@ export function PageCanvas({
     return ()=>document.removeEventListener("keydown",onKey);
   },[]);
 
+
+  function markupControlHandles(value:MovableBox){
+    if(!viewport || tool!=="select" || selectedAnnotationId!==value.id)return null;
+    const box=value.box;
+    const corners:ReadonlyArray<{
+      kind:BoxResizeCorner;
+      point:Point;
+    }>=[
+      {kind:"north-west",point:{x:box.x,y:box.y+box.height}},
+      {kind:"north-east",point:{x:box.x+box.width,y:box.y+box.height}},
+      {kind:"south-west",point:{x:box.x,y:box.y}},
+      {kind:"south-east",point:{x:box.x+box.width,y:box.y}}
+    ];
+    return <g className="markup-grips" data-editing={value.kind}>
+      {corners.map(({kind,point})=>{
+        const at=pdfToViewport(viewport.transform,point);
+        const action:DragAction={kind:"resize",corner:kind};
+        return <circle key={kind}
+          data-grip={"resize-"+kind}
+          cx={at.x} cy={at.y} r={6}
+          role="button" tabIndex={0}
+          aria-label={"Resize "+(value.kind==="callout"?"callout":"text")+" "+kind}
+          className="markup-control-handle markup-resize-handle"
+          onPointerDown={event=>beginDrag(event,value,action)}
+          onKeyDown={event=>keyboardMove(event,value,action)}
+        />;
+      })}
+      {value.kind==="callout" && (["tip","elbow"] as const).map(handle=>{
+        const point=handle==="tip"
+          ?value.leader[0]!
+          :value.leader.length===3?value.leader[1]!
+            :{
+              x:(value.leader[0]!.x+value.leader[1]!.x)/2,
+              y:(value.leader[0]!.y+value.leader[1]!.y)/2
+            };
+        const position=pdfToViewport(viewport.transform,point);
+        const action:DragAction={kind:"leader",handle};
+        return <circle key={handle}
+          data-grip={"leader-"+handle}
+          cx={position.x} cy={position.y} r={7}
+          role="button" tabIndex={0}
+          aria-label={handle==="tip"?"Move callout arrow tip":"Move callout elbow"}
+          className={"markup-control-handle markup-"+handle+"-handle"}
+          onPointerDown={event=>beginDrag(event,value,action)}
+          onKeyDown={event=>keyboardMove(event,value,action)}
+        />;
+      })}
+    </g>;
+  }
+
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
     if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -371,7 +421,7 @@ export function PageCanvas({
               return (
                 <g key={annotation.id}
                   onClick={event => {event.stopPropagation();onSelect(annotation.id);}}
-                  className="annotation-mark" opacity={isDragging ? 0.9 : imported ? 0.12 : 1}>
+                  className="annotation-mark" opacity={selected || isDragging ? 1 : imported ? 0.12 : 1}>
                   <rect x={rect.x} y={rect.y}
                     width={rect.width} height={rect.height}
                     role="button" tabIndex={0}
@@ -388,6 +438,7 @@ export function PageCanvas({
                     pointerEvents="none">
                     {annotation.text.slice(0,60)}
                   </text>
+                  {markupControlHandles(annotation)}
                 </g>
               );
             }
@@ -405,7 +456,7 @@ export function PageCanvas({
               <g key={annotation.id}
                 onClick={(event) => { event.stopPropagation(); onSelect(annotation.id); }}
                 className="annotation-mark"
-                opacity={isDragging ? annotation.style.opacity : imported ? 0.12 : annotation.style.opacity}
+                opacity={selected || isDragging ? annotation.style.opacity : imported ? 0.12 : annotation.style.opacity}
               >
                 <polyline points={leaderCoordinates(annotation.leader, viewport.transform)}
                   fill="none" stroke={annotation.style.stroke}
@@ -428,6 +479,7 @@ export function PageCanvas({
                   fill="#17212c" pointerEvents="none">
                   {annotation.text.length > 38 ? annotation.text.slice(0, 37) + "…" : annotation.text}
                 </text>
+                {markupControlHandles(annotation)}
               </g>
             );
           })}
