@@ -295,3 +295,21 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   .document-viewport.view-scroll{padding:10px}
   .view-row{gap:10px}
 }
+
+/* Selected markup handles: separate arrow target, elbow and four box corners. */
+.markup-control-handle {
+  stroke:#fff;stroke-width:1.6;fill:#287bd8;
+  cursor:move;pointer-events:all;touch-action:none;
+  filter:drop-shadow(0 1px 2px #183047aa);
+}
+.markup-control-handle:hover {stroke:#0b337a;stroke-width:2;fill:#55abff}
+.markup-control-handle:focus-visible {
+  stroke:#102cff;stroke-width:3;
+  outline:none;filter:drop-shadow(0 0 3px #3d81ff);
+}
+.markup-resize-handle {fill:#fff;stroke:#2565c2;cursor:nwse-resize}
+.markup-resize-handle[data-grip="resize-north-east"],
+.markup-resize-handle[data-grip="resize-south-west"] {cursor:nesw-resize}
+.markup-tip-handle {fill:#f66a52;stroke:#fff;cursor:crosshair}
+.markup-elbow-handle {fill:#ffe390;stroke:#135a96;cursor:crosshair}
+.markup-grips {opacity:1;pointer-events:visiblePainted}
