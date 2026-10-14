@@ -30,11 +30,12 @@ export interface DocumentViewportProps {
   onMoveBox:(value:MovableBox)=>void;
   onVisiblePage:(index:number)=>void;
   onViewportResize:(width:number,height:number)=>void;
+  onRendered?:(pageIndex:number)=>void;
 }
 
 interface SlotProps extends Pick<DocumentViewportProps,
   "pdf"|"zoom"|"tool"|"annotations"|"selectedAnnotationId"|
-  "onSelect"|"onAddCallout"|"onAddText"|"onAddNote"|"onMoveBox"> {
+  "onSelect"|"onAddCallout"|"onAddText"|"onAddNote"|"onMoveBox"|"onRendered"> {
   pageNumber:number;
   enabled:boolean;
   fallbackSize:{width:number;height:number};
@@ -97,7 +98,8 @@ function PageSlot({
         onAddCallout={events.onAddCallout}
         onAddText={events.onAddText}
         onAddNote={events.onAddNote}
-        onMoveBox={events.onMoveBox}/>:
+        onMoveBox={events.onMoveBox}
+        onRendered={events.onRendered}/>:
       <div className="view-page-skeleton"
         style={{width:Math.max(100,size.width),height:Math.max(100,size.height)}}
         aria-label={"Page "+pageNumber+" preview placeholder"}>
@@ -267,7 +269,8 @@ export function DocumentViewport(props:DocumentViewportProps){
             onAddCallout={events.onAddCallout}
             onAddText={events.onAddText}
             onAddNote={events.onAddNote}
-            onMoveBox={events.onMoveBox}/>)}
+            onMoveBox={events.onMoveBox}
+            onRendered={events.onRendered}/>)}
         </div>;
       })}
       <p className="workspace-tip">
