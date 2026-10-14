@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef, type MouseEvent } from "react";
+import { useEffect, useState, useRef, type MouseEvent, type PointerEvent, type KeyboardEvent } from "react";
 import {
   newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Matrix, type Point
+  relocateMarkupBox, nudgeMarkupBox,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type MovableBox, type Rect, type Matrix, type Point
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
+import { budgetCanvas } from "./render-sizing";
 
 export interface PageCanvasProps {
   page: PdfPage | undefined;
@@ -17,6 +19,9 @@ export interface PageCanvasProps {
   onAddCallout: (annotation: CalloutAnnotation) => void;
   onAddText: (annotation: TextBoxAnnotation) => void;
   onAddNote: (annotation: StickyNoteAnnotation) => void;
+  /** Commit after pointer up or keyboard nudge; one Undo entry per move. */
+  onMoveBox: (annotation: MovableBox) => void;
+  onRendered?: (pageIndex:number)=>void;
 }
 
 interface ViewportInfo {
@@ -34,11 +39,19 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 
 export function PageCanvas({
   page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout, onAddText, onAddNote
+  onSelect, onAddCallout, onAddText, onAddNote, onMoveBox,onRendered
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
   const [error, setError] = useState<string>();
+  const [dragPreview, setDragPreview] = useState<MovableBox>();
+  const dragRef = useRef<{
+    pointerId:number;
+    start:Point;
+    annotation:MovableBox;
+    bounds:Rect;
+  } | undefined>(undefined);
+  const previewFrame = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!page) {
@@ -53,14 +66,15 @@ export function PageCanvas({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const view = page.getViewport({ scale: zoom });
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const {ratio,backingWidth,backingHeight}=budgetCanvas(
+        view.width,view.height,window.devicePixelRatio||1
+      );
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("Canvas 2D is unavailable.");
-      canvas.width = Math.max(1, Math.floor(view.width * ratio));
-      canvas.height = Math.max(1, Math.floor(view.height * ratio));
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
       canvas.style.width = String(view.width) + "px";
       canvas.style.height = String(view.height) + "px";
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
       const renderStarted = performance.now();
       diagnostics.record("render", "PDF_RENDER_START", "info", {
         pageIndex, zoomPercent: zoom * 100
@@ -69,6 +83,7 @@ export function PageCanvas({
         canvas,
         canvasContext: context,
         viewport: view,
+        transform:[ratio,0,0,ratio,0,0],
         background: "rgb(255,255,255)"
       });
       cancelRender = () => task.cancel();
@@ -82,6 +97,7 @@ export function PageCanvas({
           diagnostics.record("render", "PDF_RENDER_OK", "info", {
             pageIndex, zoomPercent: zoom * 100, durationMs: performance.now() - renderStarted
           });
+          onRendered?.(pageIndex);
         }
       } catch (reason) {
         if (cancelled) {
@@ -103,6 +119,138 @@ export function PageCanvas({
       cancelRender?.();
     };
   }, [page, zoom]);
+
+
+  function getPdfPoint(svg:SVGSVGElement,clientX:number,clientY:number):Point {
+    if(!viewport)throw new Error("PDF page transform is not ready.");
+    const rect=svg.getBoundingClientRect();
+    return viewportToPdf(viewport.transform,{
+      x:(clientX-rect.left)*viewport.width/rect.width,
+      y:(clientY-rect.top)*viewport.height/rect.height
+    });
+  }
+
+  function visibleBounds():Rect {
+    if(!page)throw new Error("PDF page not available.");
+    const [left=0,bottom=0,right=612,top=792]=page.view;
+    return {x:left,y:bottom,width:right-left,height:top-bottom};
+  }
+
+  function beginDrag(event:PointerEvent<SVGRectElement>,annotation:MovableBox){
+    if(tool!=="select" || !viewport || !page || event.button!==0)return;
+    const svg=event.currentTarget.ownerSVGElement;
+    if(!svg)return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(annotation.id);
+    try{
+      dragRef.current={
+        pointerId:event.pointerId,
+        start:getPdfPoint(svg,event.clientX,event.clientY),
+        annotation,bounds:visibleBounds()
+      };
+      svg.setPointerCapture(event.pointerId);
+      setDragPreview(annotation);
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Unable to move annotation.");
+    }
+  }
+
+  function currentDrag(svg:SVGSVGElement,clientX:number,clientY:number):MovableBox|undefined {
+    const info=dragRef.current;
+    if(!info)return undefined;
+    const current=getPdfPoint(svg,clientX,clientY);
+    return relocateMarkupBox(info.annotation,{
+      x:current.x-info.start.x,
+      y:current.y-info.start.y
+    },info.bounds);
+  }
+
+  function pointerMove(event:PointerEvent<SVGSVGElement>){
+    if(!dragRef.current || dragRef.current.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    if(previewFrame.current!==undefined)cancelAnimationFrame(previewFrame.current);
+    const svg=event.currentTarget;
+    // Coalesce fast pointer movement to one lightweight SVG update per frame.
+    const {clientX,clientY}=event;
+    previewFrame.current=requestAnimationFrame(()=>{
+      previewFrame.current=undefined;
+      try{
+        const moved=currentDrag(svg,clientX,clientY);
+        if(moved)setDragPreview(moved);
+      }catch{/* stale pointer or disposed page cancels on pointerup */}
+    });
+  }
+
+  function endDrag(event:PointerEvent<SVGSVGElement>,commit:boolean){
+    const info=dragRef.current;
+    if(!info||event.pointerId!==info.pointerId)return;
+    event.stopPropagation();
+    if(previewFrame.current!==undefined){
+      cancelAnimationFrame(previewFrame.current);
+      previewFrame.current=undefined;
+    }
+    dragRef.current=undefined;
+    if(event.currentTarget.hasPointerCapture(event.pointerId)){
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDragPreview(undefined);
+    if(!commit)return;
+    try{
+      const updated=currentDragFromEnd(info,event.currentTarget,event.clientX,event.clientY);
+      const moved=Math.abs(updated.box.x-info.annotation.box.x)>0.05 ||
+        Math.abs(updated.box.y-info.annotation.box.y)>0.05;
+      if(moved)onMoveBox({...updated,updatedAt:new Date().toISOString()});
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Could not commit annotation move.");
+    }
+  }
+
+  function currentDragFromEnd(
+    info:NonNullable<typeof dragRef.current>,
+    svg:SVGSVGElement,clientX:number,clientY:number
+  ):MovableBox{
+    const current=getPdfPoint(svg,clientX,clientY);
+    return relocateMarkupBox(info.annotation,{
+      x:current.x-info.start.x,
+      y:current.y-info.start.y
+    },info.bounds);
+  }
+
+  function keyboardMove(event:KeyboardEvent<SVGRectElement>,annotation:MovableBox){
+    if(tool!=="select"||!page)return;
+    const direction={
+      ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"
+    }[event.key] as "left"|"right"|"up"|"down"|undefined;
+    if(!direction)return;
+    event.preventDefault();
+    event.stopPropagation();
+    try{
+      const moved=nudgeMarkupBox(annotation,visibleBounds(),direction,event.shiftKey);
+      if(moved.box.x!==annotation.box.x || moved.box.y!==annotation.box.y){
+        onMoveBox({...moved,updatedAt:new Date().toISOString()});
+      }
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Cannot nudge the markup.");
+    }
+  }
+
+  useEffect(()=>{
+    return ()=>{
+      if(previewFrame.current!==undefined)cancelAnimationFrame(previewFrame.current);
+    };
+  },[]);
+
+  useEffect(()=>{
+    const onKey=(event:globalThis.KeyboardEvent)=>{
+      if(event.key!=="Escape"||!dragRef.current)return;
+      dragRef.current=undefined;
+      setDragPreview(undefined);
+      if(previewFrame.current!==undefined)cancelAnimationFrame(previewFrame.current);
+    };
+    document.addEventListener("keydown",onKey);
+    return ()=>document.removeEventListener("keydown",onKey);
+  },[]);
 
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
     if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
@@ -145,10 +293,15 @@ export function PageCanvas({
           height={viewport.height}
           viewBox={"0 0 " + viewport.width + " " + viewport.height}
           onClick={handlePageClick}
+          onPointerMove={pointerMove}
+          onPointerUp={event=>endDrag(event,true)}
+          onPointerCancel={event=>endDrag(event,false)}
           style={{ cursor: tool !== "select" ? "crosshair" : "default" }}
           aria-label="Page annotation overlay"
         >
-          {annotations.filter((annotation) => annotation.pageIndex === pageIndex).map((annotation) => {
+          {annotations.filter((item) => item.pageIndex === pageIndex).map((item) => {
+            const annotation:Annotation = dragPreview?.id===item.id ? dragPreview : item;
+            const isDragging=Boolean(dragPreview?.id===item.id);
             // PDF.js already paints imported native appearances underneath.
             // Keep the edit handle faint until the document is exported again.
             const imported=Boolean(annotation.sourceName);
@@ -158,9 +311,14 @@ export function PageCanvas({
               return (
                 <g key={annotation.id}
                   onClick={event => {event.stopPropagation();onSelect(annotation.id);}}
-                  className="annotation-mark" opacity={imported ? 0.12 : 1}>
+                  className="annotation-mark" opacity={isDragging ? 0.9 : imported ? 0.12 : 1}>
                   <rect x={rect.x} y={rect.y}
                     width={rect.width} height={rect.height}
+                    role="button" tabIndex={0}
+                    aria-label={"Move text box on page "+(pageIndex+1)}
+                    onPointerDown={event=>beginDrag(event,annotation)}
+                    onKeyDown={event=>keyboardMove(event,annotation)}
+                    className="markup-drag-box"
                     fill="transparent"
                     stroke={selected ? "#187aff" : "#95a2b1"}
                     strokeDasharray="4 3" strokeWidth={selected ? 2 : 1} />
@@ -187,7 +345,7 @@ export function PageCanvas({
               <g key={annotation.id}
                 onClick={(event) => { event.stopPropagation(); onSelect(annotation.id); }}
                 className="annotation-mark"
-                opacity={imported ? 0.12 : annotation.style.opacity}
+                opacity={isDragging ? annotation.style.opacity : imported ? 0.12 : annotation.style.opacity}
               >
                 <polyline points={leaderCoordinates(annotation.leader, viewport.transform)}
                   fill="none" stroke={annotation.style.stroke}
@@ -197,6 +355,11 @@ export function PageCanvas({
                   cy={pdfToViewport(viewport.transform, annotation.leader[0]!).y}
                   r={3} fill={annotation.style.stroke} />
                 <rect x={box.x} y={box.y} width={box.width} height={box.height}
+                  role="button" tabIndex={0}
+                  aria-label={"Move callout box on page "+(pageIndex+1)}
+                  onPointerDown={event=>beginDrag(event,annotation)}
+                  onKeyDown={event=>keyboardMove(event,annotation)}
+                  className="markup-drag-box"
                   rx={2} fill={annotation.style.fill}
                   stroke={selected ? "#2574e8" : annotation.style.stroke}
                   strokeWidth={selected ? 2.5 : annotation.style.lineWidth * zoom} />

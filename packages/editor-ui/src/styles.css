@@ -232,3 +232,66 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
   flex-wrap:wrap;font-size:12px}
 .printer-capabilities select {border:1px solid #5b7794;background:#28415b;
   color:#fff;border-radius:5px;padding:7px;max-width:100%}
+
+.markup-drag-box { cursor: grab; touch-action: none; }
+.markup-drag-box:active { cursor: grabbing; }
+.markup-drag-box:focus-visible { stroke: #1655ff !important;
+  stroke-width: 3px; outline: none; stroke-dasharray: 6 3; }
+.annotation-layer:has(.markup-drag-box:active) { user-select: none; }
+
+
+/* APDF-54: view choices retain a bounded number of live PDF raster canvases. */
+.toolstrip { overflow-x:auto; scrollbar-width:thin; }
+.toolstrip .view-toolbar-label { display:flex; align-items:center; gap:6px;
+  font-size:11px; font-weight:700; color:#cbdbea; white-space:nowrap; }
+.view-toolbar-label select, .view-zoom-select {
+  background:#253c55; color:#f0f7ff; border:1px solid #607895;
+  border-radius:5px; padding:5px 7px; font-size:11px;
+}
+.view-toolbar-label select { max-width:170px; }
+.view-zoom-select { max-width:105px; }
+.view-cover-option { display:flex; align-items:center;gap:5px;
+  white-space:nowrap;font-size:11px;color:#d6e7fa; }
+.view-cover-option input { margin:0; accent-color:#4796ee; }
+.goto-page { width:52px;min-width:52px;padding:5px;
+  border:1px solid #607895;border-radius:5px;background:#263b55;
+  color:#fff;font-size:12px;text-align:center; }
+.goto-page::-webkit-inner-spin-button { opacity:.5; }
+
+.document-viewport.view-scroll {
+  display:block;
+  overflow:auto;
+  height:100%;
+  overscroll-behavior:contain;
+  flex:1;
+  padding:20px 22px 56px;
+  scroll-behavior:auto;
+  background:#384657;
+}
+.view-content { display:flex;flex-direction:column;align-items:center;
+  width:max-content;min-width:100%;margin:0 auto; }
+.view-row { display:flex;align-items:flex-start;justify-content:center;
+  gap:18px;min-width:100%;margin:0 0 18px;scroll-margin-top:16px; }
+.view-row-two { align-items:flex-start; }
+.view-page-slot { flex:0 0 auto;position:relative; }
+.view-page-skeleton {
+  display:flex;justify-content:center;align-items:flex-start;
+  padding:16px;background:#edf1f5;color:#76889a;
+  font-size:11px;box-shadow:0 5px 15px #111c293b;
+  box-sizing:border-box;
+}
+.view-scroll .paper-frame {
+  box-shadow:0 5px 18px #101a2855;
+}
+.view-scroll .workspace-tip {
+  position:sticky;left:12px;right:12px;bottom:10px;
+  max-width:calc(100vw - 400px);
+  margin:10px auto 0;text-align:center;z-index:2;
+}
+.view-mode-two-up .view-content,
+.view-mode-two-up-continuous .view-content { padding-left:8px;padding-right:8px; }
+@media (max-width:1000px) {
+  .view-toolbar-label select{max-width:145px}
+  .document-viewport.view-scroll{padding:10px}
+  .view-row{gap:10px}
+}

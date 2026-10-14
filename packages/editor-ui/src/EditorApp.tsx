@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
   type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
@@ -10,10 +10,15 @@ import {
 import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
 import { exportEditedPdf,readEditableAnnotations,planAnnotationEdits } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
-import { PageCanvas } from "./PageCanvas";
+import { DocumentViewport } from "./DocumentViewport";
+import {
+  DEFAULT_VIEW_PREFERENCES,VIEW_MODES,adjacentPage,
+  isContinuous,isTwoUp,normalizedViewPreferences,zoomToFit,
+  type ViewMode,type ZoomMode,type ViewPreferences
+} from "./view-layout";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { PageOperationsPanel } from "./PageOperationsPanel";
-import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
+import { pdfError, startOpenPdf, type PdfDocument } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
   safeOverwriteOriginal, safeSaveAs, supportsEditablePicker, supportsSavePicker,
@@ -49,8 +54,17 @@ interface Session {
 }
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
-const MIN_ZOOM = 0.35;
+const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
+const PREF_KEY="axik-pdf-editor-view-v1";
+
+function readViewPreferences():ViewPreferences {
+  try{
+    return normalizedViewPreferences(JSON.parse(
+      window.localStorage.getItem(PREF_KEY)??"null"
+    ));
+  }catch{return DEFAULT_VIEW_PREFERENCES;}
+}
 
 function downloadBlob(name: string, content: Uint8Array): void {
   const data = new Uint8Array(content.byteLength);
@@ -73,10 +87,18 @@ export function EditorApp({
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
+  const startedOpening=useRef(0);
+  const firstPageMeasured=useRef(0);
   const [session, setSession] = useState<Session | null>(null);
-  const [activePage, setActivePage] = useState<PdfPage>();
+  const [initialView]=useState(readViewPreferences);
   const [pageNumber, setPageNumber] = useState(1);
-  const [zoom, setZoom] = useState(1);
+  const [pageInput,setPageInput]=useState("1");
+  const [navigationToken,setNavigationToken]=useState(0);
+  const [viewMode,setViewMode]=useState<ViewMode>(initialView.mode);
+  const [coverAlone,setCoverAlone]=useState(initialView.coverAlone);
+  const [zoomMode,setZoomMode]=useState<ZoomMode>(initialView.zoomMode);
+  const [zoom,setZoom] = useState(initialView.zoom);
+  const [viewportSize,setViewportSize]=useState({width:900,height:650});
   const [tool, setTool] = useState<"select" | "callout" | "text" | "note">("select");
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
@@ -92,37 +114,96 @@ export function EditorApp({
   const [journalStatus, setJournalStatus] = useState("No draft edits");
 
   useEffect(() => {
-    diagnostics.record("app", "APP_READY");
+    diagnostics.record("app","APP_READY","info",{
+      durationMs:performance.now()
+    });
   }, []);
+
+  useEffect(()=>{
+    try{
+      window.localStorage.setItem(PREF_KEY,JSON.stringify({
+        mode:viewMode,zoomMode,zoom,coverAlone
+      }));
+    }catch{/* blocked local storage is nonfatal */}
+  },[viewMode,zoomMode,zoom,coverAlone]);
+
+  useEffect(()=>{setPageInput(String(pageNumber))},[pageNumber]);
+
+  const viewportResize=useCallback((width:number,height:number)=>{
+    setViewportSize(prev=>
+      Math.abs(prev.width-width)<2 && Math.abs(prev.height-height)<2
+        ?prev:{width,height}
+    );
+  },[]);
+
+  const onVisiblePage=useCallback((page:number)=>{
+    setPageNumber(prev=>prev===page?prev:page);
+  },[]);
+
+  function goToPage(page:number){
+    const count=session?.pdf.numPages??0;
+    if(!count || !Number.isFinite(page))return;
+    const next=Math.max(1,Math.min(count,Math.floor(page)));
+    setPageNumber(next);
+    setNavigationToken(t=>t+1);
+  }
+
+  function changeZoom(delta:number){
+    setZoomMode("custom");
+    setZoom(prev=>Math.min(MAX_ZOOM,
+      Math.max(MIN_ZOOM,Math.round((prev+delta)*100)/100)));
+  }
+
+  function handleKeyboardNavigation(event:KeyboardEvent<HTMLElement>){
+    const target=event.target;
+    if(target instanceof HTMLInputElement ||
+       target instanceof HTMLTextAreaElement ||
+       target instanceof HTMLSelectElement ||
+       (target instanceof HTMLElement && target.isContentEditable))return;
+    if(!session?.pdf || documentBusy || event.ctrlKey || event.altKey)return;
+    const pages=session.pdf.numPages;
+    let next:number|undefined;
+    if(event.key==="PageDown"){
+      next=adjacentPage(pageNumber,pages,viewMode,coverAlone,1);
+    }else if(event.key==="PageUp"){
+      next=adjacentPage(pageNumber,pages,viewMode,coverAlone,-1);
+    }else if(event.key==="Home")next=1;
+    else if(event.key==="End")next=pages;
+    if(next===undefined)return;
+    event.preventDefault();
+    goToPage(next);
+  }
+
+  const fitReferencePage=isContinuous(viewMode)?1:pageNumber;
+  useEffect(()=>{
+    if(!session?.pdf || zoomMode==="custom")return;
+    const pdf=session.pdf;
+    let live=true;
+    pdf.getPage(fitReferencePage).then(page=>{
+      if(!live)return;
+      const rect=page.getViewport({scale:1});
+      const next=zoomToFit(
+        rect.width,rect.height,viewportSize.width,viewportSize.height,
+        zoomMode,isTwoUp(viewMode)
+      );
+      setZoom(current=>Math.abs(current-next)<.005?current:next);
+    }).catch(()=>undefined);
+    return ()=>{live=false};
+  },[session?.pdf,fitReferencePage,zoomMode,viewMode,viewportSize.width,viewportSize.height]);
 
   // Clean up worker memory when a document is replaced or this component closes.
   useEffect(() => () => { void session?.pdf.destroy(); }, [session?.pdf]);
 
-  // PDF.js only fetches/renders the selected page. Multi-page tiling is a later milestone.
-  useEffect(() => {
-    let active = true;
-    setActivePage(undefined);
-    if (session?.pdf) {
-      const start = performance.now();
-      diagnostics.record("document", "PDF_PAGE_LOAD_START", "info", {
-        pageIndex: pageNumber - 1
-      });
-      session.pdf.getPage(pageNumber).then((page) => {
-        if (active) {
-          setActivePage(page);
-          diagnostics.record("document", "PDF_PAGE_LOAD_OK", "info", {
-            pageIndex: pageNumber - 1, durationMs: performance.now() - start
-          });
-        }
-      }).catch((reason: unknown) => {
-        if (active) {
-          setError(pdfError(reason));
-          diagnostics.recordError("document", "PDF_PAGE_LOAD_FAILED", reason);
-        }
-      });
-    }
-    return () => { active = false; };
-  }, [session?.pdf, pageNumber]);
+  // The virtualized viewport loads only the actual visible pages.
+  // Never request the active page a second time on every scroll update.
+  const onPageRendered=useCallback((index:number)=>{
+    if(index!==0 || firstPageMeasured.current===generationRef.current ||
+        !startedOpening.current)return;
+    firstPageMeasured.current=generationRef.current;
+    diagnostics.record("performance","PDF_FIRST_PAGE_INTERACTIVE","info",{
+      durationMs:performance.now()-startedOpening.current
+    });
+  },[]);
 
   // Edits are persisted locally, not in the source PDF. Never call this "PDF saved".
   useEffect(() => {
@@ -173,6 +254,8 @@ export function EditorApp({
       }
     }
     const generation = ++generationRef.current;
+    startedOpening.current=performance.now();
+    firstPageMeasured.current=0;
     setError(undefined);
     setNotice(undefined);
     setRecovery(undefined);
@@ -370,6 +453,20 @@ export function EditorApp({
       setError(pdfError(reason));
     }
   };
+
+  function moveMarkupBox(annotation: CalloutAnnotation | TextBoxAnnotation) {
+    try {
+      setEditor(previous=>applyCommand(previous,{
+        type:"replace",annotation
+      }));
+      setSelectedId(annotation.id);
+      diagnostics.record("annotation","ANNOTATION_UPDATED","info",{
+        pageIndex:annotation.pageIndex
+      });
+    }catch(reason){
+      setError(pdfError(reason));
+    }
+  }
 
   const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
   const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
@@ -625,7 +722,9 @@ export function EditorApp({
   }
 
   return (
-    <main className="editor-root" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <main className="editor-root"
+      onKeyDown={handleKeyboardNavigation}
+      onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       <header className="topbar">
         <div className="app-brand">
           <span className="app-symbol">A</span>
@@ -698,14 +797,52 @@ export function EditorApp({
         <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
         <span className="separator" />
-        <button disabled={!session} onClick={() => setPageNumber((n) => Math.max(1, n - 1))}>◀</button>
+        <button aria-label="Previous page or spread" disabled={!session || pageNumber<=1}
+          onClick={()=>goToPage(adjacentPage(
+            pageNumber,session!.pdf.numPages,viewMode,coverAlone,-1
+          ))}>◀</button>
         <span className="page-counter">Page {session ? pageNumber : "—"} / {session?.pdf.numPages ?? "—"}</span>
-        <button disabled={!session || pageNumber >= session.pdf.numPages}
-          onClick={() => setPageNumber((n) => Math.min(session!.pdf.numPages, n + 1))}>▶</button>
+        <input className="goto-page" type="number" aria-label="Go to page"
+          min={1} max={session?.pdf.numPages??1}
+          value={pageInput} disabled={!session}
+          onChange={event=>setPageInput(event.target.value)}
+          onKeyDown={event=>{
+            if(event.key==="Enter"){goToPage(Number(pageInput));event.currentTarget.blur();}
+            if(event.key==="Escape"){setPageInput(String(pageNumber));event.currentTarget.blur();}
+          }}
+          onBlur={()=>{if(pageInput!==String(pageNumber))goToPage(Number(pageInput));}}
+        />
+        <button aria-label="Next page or spread"
+          disabled={!session || pageNumber>=session.pdf.numPages}
+          onClick={()=>goToPage(adjacentPage(
+            pageNumber,session!.pdf.numPages,viewMode,coverAlone,1
+          ))}>▶</button>
         <span className="separator" />
-        <button disabled={!session} onClick={() => setZoom((n) => Math.max(MIN_ZOOM, Math.round((n - .2) * 10) / 10))}>−</button>
+        <label className="view-toolbar-label">View
+          <select aria-label="Page view" disabled={!session}
+            value={viewMode} onChange={event=>setViewMode(event.target.value as ViewMode)}>
+            {VIEW_MODES.map(option=><option value={option.id} key={option.id}>
+              {option.label}
+            </option>)}
+          </select>
+        </label>
+        {isTwoUp(viewMode) && <label className="view-cover-option">
+          <input aria-label="Show cover page separately" type="checkbox"
+            checked={coverAlone}
+            onChange={event=>setCoverAlone(event.target.checked)} />
+          Cover alone
+        </label>}
+        <span className="separator" />
+        <button aria-label="Zoom out" disabled={!session} onClick={()=>changeZoom(-.2)}>−</button>
         <span className="zoom-display">{Math.round(zoom * 100)}%</span>
-        <button disabled={!session} onClick={() => setZoom((n) => Math.min(MAX_ZOOM, Math.round((n + .2) * 10) / 10))}>+</button>
+        <button aria-label="Zoom in" disabled={!session} onClick={()=>changeZoom(.2)}>+</button>
+        <select aria-label="Zoom preset" className="view-zoom-select"
+          disabled={!session} value={zoomMode}
+          onChange={event=>setZoomMode(event.target.value as ZoomMode)}>
+          <option value="custom">Manual</option>
+          <option value="fit-width">Fit Width</option>
+          <option value="fit-page">Fit Page</option>
+        </select>
         <span className="spacer" />
         <span className="prototype-label">Core Alpha · Not production-ready</span>
       </div>
@@ -717,8 +854,8 @@ export function EditorApp({
       </div>}
       {notice && <div className="message hint" role="status">{notice} <button onClick={() => setNotice(undefined)}>×</button></div>}
       <div className="editor-body">
-        <div className="document-viewport">
-          {!session && <section className="welcome">
+        {!session ? <div className="document-viewport">
+          <section className="welcome">
             <h1>Your documents, without the overhead.</h1>
             <p>Open a PDF to view it, navigate pages and try the local callout tool.</p>
             <button className="primary" onClick={() => void choosePdf()}>Choose a PDF</button>
@@ -729,25 +866,19 @@ export function EditorApp({
               PDF into this window. Quick Export never overwrites the original.</p>
             <p className="warning-note">This is an early foundation. Editing, intelligent printing, signing and
               secure redaction are not yet complete and must not be relied on for production work.</p>
-          </section>}
-          {session && (
-            <div className="page-workspace">
-              <PageCanvas
-                page={activePage} pageIndex={pageNumber - 1} zoom={zoom}
-                tool={tool}
-                annotations={editor.annotations}
-                selectedAnnotationId={selectedId}
-                onSelect={setSelectedId} onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
-              />
-              <p className="workspace-tip">
-                {tool === "callout" ? "Click where the callout arrow should point." :
-                  tool === "text" ? "Click to place an editable text box." :
-                  tool === "note" ? "Click to leave a sticky note comment." :
-                  "Select a callout or added text box to edit it."}
-              </p>
-            </div>
-          )}
-        </div>
+          </section>
+        </div> : <DocumentViewport
+          pdf={session.pdf}
+          pageNumber={pageNumber} navigationToken={navigationToken}
+          mode={viewMode} coverAlone={coverAlone} zoom={zoom}
+          tool={tool} annotations={editor.annotations}
+          selectedAnnotationId={selectedId}
+          onSelect={setSelectedId}
+          onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
+          onMoveBox={moveMarkupBox}
+          onVisiblePage={onVisiblePage} onViewportResize={viewportResize}
+          onRendered={onPageRendered}
+        />}
         <aside className="comments-sidebar">
           <div className="sidebar-heading"><strong>Comments &amp; markup</strong><span>{editor.annotations.length}</span></div>
           {!session && <p className="muted">Open a document to begin annotating.</p>}
@@ -755,7 +886,7 @@ export function EditorApp({
           {editor.annotations.map((annotation) => (
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
-              onClick={() => { setPageNumber(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
+              onClick={() => { goToPage(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
               <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
