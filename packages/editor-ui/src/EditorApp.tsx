@@ -18,7 +18,7 @@ import {
 } from "./view-layout";
 import { PrintPlanPanel } from "./PrintPlanPanel";
 import { PageOperationsPanel } from "./PageOperationsPanel";
-import { pdfError, startOpenPdf, type PdfDocument, type PdfPage } from "./pdf";
+import { pdfError, startOpenPdf, type PdfDocument } from "./pdf";
 import {
   backupSuggestedName, pickEditablePdf, promptForSaveTarget,
   safeOverwriteOriginal, safeSaveAs, supportsEditablePicker, supportsSavePicker,
@@ -87,8 +87,9 @@ export function EditorApp({
   const lastRequestedFileRef = useRef<File | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
+  const startedOpening=useRef(0);
+  const firstPageMeasured=useRef(0);
   const [session, setSession] = useState<Session | null>(null);
-  const [activePage, setActivePage] = useState<PdfPage>();
   const [initialView]=useState(readViewPreferences);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageInput,setPageInput]=useState("1");
@@ -113,7 +114,9 @@ export function EditorApp({
   const [journalStatus, setJournalStatus] = useState("No draft edits");
 
   useEffect(() => {
-    diagnostics.record("app", "APP_READY");
+    diagnostics.record("app","APP_READY","info",{
+      durationMs:performance.now()
+    });
   }, []);
 
   useEffect(()=>{
@@ -171,31 +174,16 @@ export function EditorApp({
   // Clean up worker memory when a document is replaced or this component closes.
   useEffect(() => () => { void session?.pdf.destroy(); }, [session?.pdf]);
 
-  // PDF.js only fetches/renders the selected page. Multi-page tiling is a later milestone.
-  useEffect(() => {
-    let active = true;
-    setActivePage(undefined);
-    if (session?.pdf) {
-      const start = performance.now();
-      diagnostics.record("document", "PDF_PAGE_LOAD_START", "info", {
-        pageIndex: pageNumber - 1
-      });
-      session.pdf.getPage(pageNumber).then((page) => {
-        if (active) {
-          setActivePage(page);
-          diagnostics.record("document", "PDF_PAGE_LOAD_OK", "info", {
-            pageIndex: pageNumber - 1, durationMs: performance.now() - start
-          });
-        }
-      }).catch((reason: unknown) => {
-        if (active) {
-          setError(pdfError(reason));
-          diagnostics.recordError("document", "PDF_PAGE_LOAD_FAILED", reason);
-        }
-      });
-    }
-    return () => { active = false; };
-  }, [session?.pdf, pageNumber]);
+  // The virtualized viewport loads only the actual visible pages.
+  // Never request the active page a second time on every scroll update.
+  const onPageRendered=useCallback((index:number)=>{
+    if(index!==0 || firstPageMeasured.current===generationRef.current ||
+        !startedOpening.current)return;
+    firstPageMeasured.current=generationRef.current;
+    diagnostics.record("performance","PDF_FIRST_PAGE_INTERACTIVE","info",{
+      durationMs:performance.now()-startedOpening.current
+    });
+  },[]);
 
   // Edits are persisted locally, not in the source PDF. Never call this "PDF saved".
   useEffect(() => {
@@ -246,6 +234,8 @@ export function EditorApp({
       }
     }
     const generation = ++generationRef.current;
+    startedOpening.current=performance.now();
+    firstPageMeasured.current=0;
     setError(undefined);
     setNotice(undefined);
     setRecovery(undefined);
@@ -865,6 +855,7 @@ export function EditorApp({
           onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
           onMoveBox={moveMarkupBox}
           onVisiblePage={onVisiblePage} onViewportResize={viewportResize}
+          onRendered={onPageRendered}
         />}
         <aside className="comments-sidebar">
           <div className="sidebar-heading"><strong>Comments &amp; markup</strong><span>{editor.annotations.length}</span></div>
