@@ -84,7 +84,7 @@ export function zoomToFit(
   const scale=mode==="fit-width"
     ?width/pageWidth
     :Math.min(width/pageWidth,height/pageHeight);
-  return Math.round(Math.min(3,Math.max(.35,scale))*100)/100;
+  return Math.round(Math.min(3,Math.max(.1,scale))*100)/100;
 }
 export function normalizedViewPreferences(value:unknown):ViewPreferences{
   const raw=(value&&typeof value==="object")?value as Partial<ViewPreferences>:{};
@@ -94,7 +94,7 @@ export function normalizedViewPreferences(value:unknown):ViewPreferences{
     mode:known?raw.mode!:DEFAULT_VIEW_PREFERENCES.mode,
     zoomMode:["custom","fit-width","fit-page"].includes(raw.zoomMode??"")
       ?raw.zoomMode!:DEFAULT_VIEW_PREFERENCES.zoomMode,
-    zoom:typeof zoom==="number"&&Number.isFinite(zoom)&&zoom>=.35&&zoom<=3
+    zoom:typeof zoom==="number"&&Number.isFinite(zoom)&&zoom>=.1&&zoom<=3
       ?zoom:1,
     coverAlone:typeof raw.coverAlone==="boolean"?raw.coverAlone:true
   };
