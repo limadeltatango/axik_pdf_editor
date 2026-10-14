@@ -169,19 +169,23 @@ export function DocumentViewport(props:DocumentViewportProps){
   const scan=useCallback(()=>{
     const root=rootRef.current;
     if(!root||!continuous)return;
-    const bounds=root.getBoundingClientRect();
-    const top=bounds.top+Math.min(100,bounds.height/5);
-    let best=0,bestDistance=Infinity;
     const rows=root.querySelectorAll<HTMLElement>("[data-view-row]");
-    rows.forEach((row)=>{
-      const rect=row.getBoundingClientRect();
-      const target=rect.top<=top&&rect.bottom>=top
-        ?0:Math.min(Math.abs(rect.top-top),Math.abs(rect.bottom-top));
-      if(target<bestDistance){
-        bestDistance=target;
-        best=Number(row.dataset.viewRow??"0");
-      }
-    });
+    if(!rows.length)return;
+    // Avoid a forced layout read on EVERY row at 60 fps. The view-content
+    // establishes the offset parent; binary search needs O(log N) geometry
+    // reads even on a thousand-page drawing set.
+    const target=root.scrollTop+Math.min(100,root.clientHeight/5);
+    let low=0,high=rows.length-1,best=0;
+    while(low<=high){
+      const mid=Math.floor((low+high)/2);
+      const row=rows[mid]!;
+      const top=row.offsetTop;
+      const bottom=top+row.offsetHeight;
+      best=mid;
+      if(target<top)high=mid-1;
+      else if(target>=bottom)low=mid+1;
+      else break;
+    }
     const group=groups[best];
     if(!group)return;
     setFocusGroup(prev=>prev===best?prev:best);
@@ -277,7 +281,7 @@ export function DocumentViewport(props:DocumentViewportProps){
         {events.tool==="callout"?"Click where the callout arrow should point.":
           events.tool==="text"?"Click to place editable text.":
           events.tool==="note"?"Click to leave a comment.":
-          "Drag a markup box to move it; the arrow tip stays fixed. Arrow keys nudge a focused box."}
+          "Select a markup, then drag its box or corner handles to move/resize. Callout tip and elbow grips move independently. Arrow keys nudge focused grips."}
       </p>
     </div>
   </div>;

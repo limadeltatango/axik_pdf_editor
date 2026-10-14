@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef, type MouseEvent, type PointerEvent, type KeyboardEvent } from "react";
 import {
   newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
-  relocateMarkupBox, nudgeMarkupBox,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type MovableBox, type Rect, type Matrix, type Point
+  relocateMarkupBox, nudgeMarkupBox, resizeMarkupBox,
+  positionCalloutHandle,nudgeCalloutHandle,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
+  type MovableBox,type CalloutHandle,type BoxResizeCorner,type Rect,type Matrix,type Point
 } from "@axik/document-core";
 import { diagnostics } from "@axik/diagnostics";
 import type { PdfPage } from "./pdf";
@@ -45,11 +47,17 @@ export function PageCanvas({
   const [viewport, setViewport] = useState<ViewportInfo>();
   const [error, setError] = useState<string>();
   const [dragPreview, setDragPreview] = useState<MovableBox>();
+  type DragAction = {kind:"box"}
+    | {kind:"resize";corner:BoxResizeCorner}
+    | {kind:"leader";handle:CalloutHandle};
   const dragRef = useRef<{
     pointerId:number;
     start:Point;
     annotation:MovableBox;
     bounds:Rect;
+    svg:SVGSVGElement;
+    action:DragAction;
+    startedAt:number;
   } | undefined>(undefined);
   const previewFrame = useRef<number | undefined>(undefined);
 
@@ -136,8 +144,12 @@ export function PageCanvas({
     return {x:left,y:bottom,width:right-left,height:top-bottom};
   }
 
-  function beginDrag(event:PointerEvent<SVGRectElement>,annotation:MovableBox){
+  function beginDrag(
+    event:PointerEvent<SVGElement>,annotation:MovableBox,
+    action:DragAction={kind:"box"}
+  ){
     if(tool!=="select" || !viewport || !page || event.button!==0)return;
+    if(action.kind==="leader" && annotation.kind!=="callout")return;
     const svg=event.currentTarget.ownerSVGElement;
     if(!svg)return;
     event.preventDefault();
@@ -147,23 +159,47 @@ export function PageCanvas({
       dragRef.current={
         pointerId:event.pointerId,
         start:getPdfPoint(svg,event.clientX,event.clientY),
-        annotation,bounds:visibleBounds()
+        annotation,bounds:visibleBounds(),svg,action,
+        startedAt:performance.now()
       };
       svg.setPointerCapture(event.pointerId);
       setDragPreview(annotation);
     }catch(reason){
-      setError(reason instanceof Error?reason.message:"Unable to move annotation.");
+      setError(reason instanceof Error?reason.message:"Unable to manipulate markup.");
     }
+  }
+
+  function applyGesture(
+    info:NonNullable<typeof dragRef.current>,current:Point
+  ):MovableBox{
+    const delta={
+      x:current.x-info.start.x,
+      y:current.y-info.start.y
+    };
+    if(info.action.kind==="resize"){
+      return resizeMarkupBox(info.annotation,info.action.corner,delta,info.bounds);
+    }
+    if(info.action.kind==="leader"){
+      if(info.annotation.kind!=="callout"){
+        throw new TypeError("Only callouts have leader handles.");
+      }
+      const a=info.annotation;
+      const point=info.action.handle==="tip"
+        ?a.leader[0]!
+        :a.leader.length===3?a.leader[1]!
+          :{x:(a.leader[0]!.x+a.leader[1]!.x)/2,
+            y:(a.leader[0]!.y+a.leader[1]!.y)/2};
+      return positionCalloutHandle(a,info.action.handle,{
+        x:point.x+delta.x,y:point.y+delta.y
+      },info.bounds);
+    }
+    return relocateMarkupBox(info.annotation,delta,info.bounds);
   }
 
   function currentDrag(svg:SVGSVGElement,clientX:number,clientY:number):MovableBox|undefined {
     const info=dragRef.current;
     if(!info)return undefined;
-    const current=getPdfPoint(svg,clientX,clientY);
-    return relocateMarkupBox(info.annotation,{
-      x:current.x-info.start.x,
-      y:current.y-info.start.y
-    },info.bounds);
+    return applyGesture(info,getPdfPoint(svg,clientX,clientY));
   }
 
   function pointerMove(event:PointerEvent<SVGSVGElement>){
@@ -198,9 +234,19 @@ export function PageCanvas({
     if(!commit)return;
     try{
       const updated=currentDragFromEnd(info,event.currentTarget,event.clientX,event.clientY);
-      const moved=Math.abs(updated.box.x-info.annotation.box.x)>0.05 ||
-        Math.abs(updated.box.y-info.annotation.box.y)>0.05;
-      if(moved)onMoveBox({...updated,updatedAt:new Date().toISOString()});
+      const before=info.annotation,changed=
+        Math.abs(updated.box.x-before.box.x)>0.05 ||
+        Math.abs(updated.box.y-before.box.y)>0.05 ||
+        Math.abs(updated.box.width-before.box.width)>0.05 ||
+        Math.abs(updated.box.height-before.box.height)>0.05 ||
+        (updated.kind==="callout" && before.kind==="callout" &&
+          JSON.stringify(updated.leader)!==JSON.stringify(before.leader));
+      if(changed){
+        onMoveBox({...updated,updatedAt:new Date().toISOString()});
+        diagnostics.record("annotation","ANNOTATION_UPDATED","info",{
+          durationMs:performance.now()-info.startedAt
+        });
+      }
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Could not commit annotation move.");
     }
@@ -211,13 +257,11 @@ export function PageCanvas({
     svg:SVGSVGElement,clientX:number,clientY:number
   ):MovableBox{
     const current=getPdfPoint(svg,clientX,clientY);
-    return relocateMarkupBox(info.annotation,{
-      x:current.x-info.start.x,
-      y:current.y-info.start.y
-    },info.bounds);
+    return applyGesture(info,current);
   }
 
-  function keyboardMove(event:KeyboardEvent<SVGRectElement>,annotation:MovableBox){
+  function keyboardMove(event:KeyboardEvent<SVGElement>,annotation:MovableBox,
+    action:DragAction={kind:"box"}){
     if(tool!=="select"||!page)return;
     const direction={
       ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"
@@ -226,8 +270,20 @@ export function PageCanvas({
     event.preventDefault();
     event.stopPropagation();
     try{
-      const moved=nudgeMarkupBox(annotation,visibleBounds(),direction,event.shiftKey);
-      if(moved.box.x!==annotation.box.x || moved.box.y!==annotation.box.y){
+      const bounds=visibleBounds();
+      const size=event.shiftKey?10:1;
+      const delta={
+        left:{x:-size,y:0},right:{x:size,y:0},
+        up:{x:0,y:size},down:{x:0,y:-size}
+      }[direction];
+      const moved=action.kind==="resize"
+        ?resizeMarkupBox(annotation,action.corner,delta,bounds)
+        :action.kind==="leader" && annotation.kind==="callout"
+          ?nudgeCalloutHandle(annotation,action.handle,bounds,direction,event.shiftKey)
+          :nudgeMarkupBox(annotation,bounds,direction,event.shiftKey);
+      if(JSON.stringify(moved.box)!==JSON.stringify(annotation.box) ||
+        (moved.kind==="callout" && annotation.kind==="callout" &&
+          JSON.stringify(moved.leader)!==JSON.stringify(annotation.leader))){
         onMoveBox({...moved,updatedAt:new Date().toISOString()});
       }
     }catch(reason){
@@ -244,6 +300,10 @@ export function PageCanvas({
   useEffect(()=>{
     const onKey=(event:globalThis.KeyboardEvent)=>{
       if(event.key!=="Escape"||!dragRef.current)return;
+      const drag=dragRef.current;
+      if(drag?.svg.hasPointerCapture(drag.pointerId)){
+        drag.svg.releasePointerCapture(drag.pointerId);
+      }
       dragRef.current=undefined;
       setDragPreview(undefined);
       if(previewFrame.current!==undefined)cancelAnimationFrame(previewFrame.current);
@@ -251,6 +311,56 @@ export function PageCanvas({
     document.addEventListener("keydown",onKey);
     return ()=>document.removeEventListener("keydown",onKey);
   },[]);
+
+
+  function markupControlHandles(value:MovableBox){
+    if(!viewport || tool!=="select" || selectedAnnotationId!==value.id)return null;
+    const box=value.box;
+    const corners:ReadonlyArray<{
+      kind:BoxResizeCorner;
+      point:Point;
+    }>=[
+      {kind:"north-west",point:{x:box.x,y:box.y+box.height}},
+      {kind:"north-east",point:{x:box.x+box.width,y:box.y+box.height}},
+      {kind:"south-west",point:{x:box.x,y:box.y}},
+      {kind:"south-east",point:{x:box.x+box.width,y:box.y}}
+    ];
+    return <g className="markup-grips" data-editing={value.kind}>
+      {corners.map(({kind,point})=>{
+        const at=pdfToViewport(viewport.transform,point);
+        const action:DragAction={kind:"resize",corner:kind};
+        return <circle key={kind}
+          data-grip={"resize-"+kind}
+          cx={at.x} cy={at.y} r={6}
+          role="button" tabIndex={0}
+          aria-label={"Resize "+(value.kind==="callout"?"callout":"text")+" "+kind}
+          className="markup-control-handle markup-resize-handle"
+          onPointerDown={event=>beginDrag(event,value,action)}
+          onKeyDown={event=>keyboardMove(event,value,action)}
+        />;
+      })}
+      {value.kind==="callout" && (["tip","elbow"] as const).map(handle=>{
+        const point=handle==="tip"
+          ?value.leader[0]!
+          :value.leader.length===3?value.leader[1]!
+            :{
+              x:(value.leader[0]!.x+value.leader[1]!.x)/2,
+              y:(value.leader[0]!.y+value.leader[1]!.y)/2
+            };
+        const position=pdfToViewport(viewport.transform,point);
+        const action:DragAction={kind:"leader",handle};
+        return <circle key={handle}
+          data-grip={"leader-"+handle}
+          cx={position.x} cy={position.y} r={7}
+          role="button" tabIndex={0}
+          aria-label={handle==="tip"?"Move callout arrow tip":"Move callout elbow"}
+          className={"markup-control-handle markup-"+handle+"-handle"}
+          onPointerDown={event=>beginDrag(event,value,action)}
+          onKeyDown={event=>keyboardMove(event,value,action)}
+        />;
+      })}
+    </g>;
+  }
 
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
     if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
@@ -311,7 +421,7 @@ export function PageCanvas({
               return (
                 <g key={annotation.id}
                   onClick={event => {event.stopPropagation();onSelect(annotation.id);}}
-                  className="annotation-mark" opacity={isDragging ? 0.9 : imported ? 0.12 : 1}>
+                  className="annotation-mark" opacity={selected || isDragging ? 1 : imported ? 0.12 : 1}>
                   <rect x={rect.x} y={rect.y}
                     width={rect.width} height={rect.height}
                     role="button" tabIndex={0}
@@ -328,6 +438,7 @@ export function PageCanvas({
                     pointerEvents="none">
                     {annotation.text.slice(0,60)}
                   </text>
+                  {markupControlHandles(annotation)}
                 </g>
               );
             }
@@ -345,7 +456,7 @@ export function PageCanvas({
               <g key={annotation.id}
                 onClick={(event) => { event.stopPropagation(); onSelect(annotation.id); }}
                 className="annotation-mark"
-                opacity={isDragging ? annotation.style.opacity : imported ? 0.12 : annotation.style.opacity}
+                opacity={selected || isDragging ? annotation.style.opacity : imported ? 0.12 : annotation.style.opacity}
               >
                 <polyline points={leaderCoordinates(annotation.leader, viewport.transform)}
                   fill="none" stroke={annotation.style.stroke}
@@ -368,6 +479,7 @@ export function PageCanvas({
                   fill="#17212c" pointerEvents="none">
                   {annotation.text.length > 38 ? annotation.text.slice(0, 37) + "…" : annotation.text}
                 </text>
+                {markupControlHandles(annotation)}
               </g>
             );
           })}

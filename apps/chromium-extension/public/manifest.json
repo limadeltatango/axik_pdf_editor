@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Axik PDF Editor — Core Alpha",
-  "description": "Local PDF editor alpha: callouts, text, comments, page management, Quick Export and fixed-stock print preparation.",
-  "version": "0.1.0",
+  "description": "Local PDF editing alpha: movable/resizable callouts, editable text, continuous and two-up views, page tools, safe export and print preparation.",
+  "version": "0.1.3",
   "minimum_chrome_version": "120",
   "action": {
     "default_title": "Open Axik PDF Editor"
