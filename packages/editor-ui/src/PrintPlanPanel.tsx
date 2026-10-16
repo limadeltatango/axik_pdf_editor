@@ -376,10 +376,10 @@ export function PrintPlanPanel({
       </>}
       <p className="diagnostics-warning">
         This generated file contains only the selected source pages. Before printing, select {media.label}, Actual Size / 100% and the correct
-        duplex setting in the OS print dialog. Physical printer-driver
-        enumeration, validated hardware margins, print spool status, and Arch
-        drawing sizes are not yet implemented. The preview above shows sheet geometry,
-        not a pixel-identical rendered print preview.
+        duplex setting in the OS print dialog. Windows printer discovery and
+        architectural paper choices are preflight aids only; loaded trays,
+        actual hardware margins, and completed driver spooling are not verified.
+        The preview above shows sheet geometry, not pixel-identical print output.
       </p>
     </section>
   </div>;

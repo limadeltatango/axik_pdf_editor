@@ -1,5 +1,5 @@
 /**
- * APDF-59: user-printable page selections are always SOURCE page numbers.
+ * APDF-62: user-printable page selections are always SOURCE page numbers.
  * Parsing and range expansion must fail closed; no silent extra sheets.
  */
 export type PrintPageMode = "all" | "current" | "custom";

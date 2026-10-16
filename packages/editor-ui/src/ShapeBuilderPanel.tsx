@@ -73,8 +73,11 @@ export function ShapeBuilderPanel({
     setNotice("");setError("");
   }
   function updateComponent(id:string,changes:Partial<SymbolPrimitive>){
+    // Validate synchronously: React may run a functional state updater later,
+    // outside this try/catch. Invalid dimensions must not crash the editor.
     try {
-      setTemplate(prev=>updateSymbolComponent(prev,id,changes));
+      const next=updateSymbolComponent(template,id,changes);
+      setTemplate(next);
       setError("");setNotice("");
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Component change invalid.");
@@ -82,19 +85,31 @@ export function ShapeBuilderPanel({
   }
   function newPrimitive(type:SymbolPrimitiveType){
     const component=nextComponent(type);
-    setTemplate(prev=>validateSymbolTemplate({
-      ...prev,primitives:[...prev.primitives,component]
-    }));
-    setSelectedId(component.id);
+    try{
+      const next=validateSymbolTemplate({
+        ...template,primitives:[...template.primitives,component]
+      });
+      setTemplate(next);
+      setSelectedId(component.id);
+      setError("");setNotice("");
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Cannot add component.");
+    }
   }
   function duplicate(){
     if(!selected)return;
     const copy={...selected,id:crypto.randomUUID(),
       x:selected.x+8,y:selected.y+8};
-    setTemplate(prev=>validateSymbolTemplate({
-      ...prev,primitives:[...prev.primitives,copy]
-    }));
-    setSelectedId(copy.id);
+    try{
+      const next=validateSymbolTemplate({
+        ...template,primitives:[...template.primitives,copy]
+      });
+      setTemplate(next);
+      setSelectedId(copy.id);
+      setError("");setNotice("");
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Cannot duplicate component.");
+    }
   }
   function remove(){
     if(!selected||template.primitives.length<=1)return;
@@ -105,11 +120,17 @@ export function ShapeBuilderPanel({
   function align(axis:"x"|"y"){
     const rect=symbolExtents(template.primitives);
     const cx=rect.x+rect.width/2,cy=rect.y+rect.height/2;
-    setTemplate(prev=>validateSymbolTemplate({...prev,
-      primitives:prev.primitives.map(p=>({
-        ...p,[axis]:axis==="x"?cx-p.width/2:cy-p.height/2
-      }))
-    }));
+    try{
+      const next=validateSymbolTemplate({...template,
+        primitives:template.primitives.map(p=>({
+          ...p,[axis]:axis==="x"?cx-p.width/2:cy-p.height/2
+        }))
+      });
+      setTemplate(next);
+      setError("");setNotice("");
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Cannot align components.");
+    }
   }
   function applyNumber(field:NumericField,value:number){
     if(!selected||!Number.isFinite(value))return;

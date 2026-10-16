@@ -1021,7 +1021,8 @@ export function EditorApp({
             <p>{dirty ? journalStatus : "No unsaved annotations"}</p>
             <p className="muted">Quick Export never overwrites. Save As selects a new file;
               Save overwrites a user-picked source only after a separate verified backup.
-              Long text, fonts and imported-callout editing are still limited. Printing,
+              Long text, fonts and imported-callout editing remain limited. Print-ready
+              PDF preparation is available, but native driver-controlled spooling,
               real existing-text editing and secure redaction are not implemented.</p>
           </div>
         </aside>
