@@ -11,6 +11,10 @@ import {
   MAX_ACTIVE_VIEW_PAGES,groupVisiblePages,isContinuous,isTwoUp,
   spreadForPage,type ViewMode
 } from "./view-layout";
+import {
+  anchoredScrollDelta,nextPointerZoom,panScrollPosition,
+  type CursorAnchor
+} from "./pan-zoom";
 
 export interface DocumentViewportProps {
   pdf:PdfDocument;
@@ -20,6 +24,7 @@ export interface DocumentViewportProps {
   mode:ViewMode;
   coverAlone:boolean;
   zoom:number;
+  onZoomChange:(nextZoom:number)=>void;
   tool:"select"|"callout"|"text"|"note";
   annotations:readonly Annotation[];
   selectedAnnotationId?:string;
@@ -110,13 +115,21 @@ function PageSlot({
 
 export function DocumentViewport(props:DocumentViewportProps){
   const {
-    pdf,pageNumber,navigationToken,mode,coverAlone,zoom,
+    pdf,pageNumber,navigationToken,mode,coverAlone,zoom,onZoomChange,
     annotations,selectedAnnotationId,onVisiblePage,onViewportResize,
     ...events
   }=props;
   const rootRef=useRef<HTMLDivElement>(null);
   const scrollFrame=useRef<number | undefined>(undefined);
   const previousZoom=useRef(zoom);
+  const currentZoom=useRef(zoom);
+  currentZoom.current=zoom;
+  const zoomPending=useRef<CursorAnchor>();
+  const panPending=useRef<{
+    pointerId:number;startX:number;startY:number;
+    left:number;top:number;
+  }>();
+  const [isPanning,setIsPanning]=useState(false);
   const continuous=isContinuous(mode),twoUp=isTwoUp(mode);
 
   const singleAnchor=continuous?0:pageNumber;
@@ -192,6 +205,110 @@ export function DocumentViewport(props:DocumentViewportProps){
     onVisiblePage(group[0]!);
   },[continuous,groups,onVisiblePage]);
 
+
+  // Ctrl+wheel zooms at cursor, plain wheel scrolls.
+  // Attaching a native non-passive listener guarantees the browser's default
+  // Ctrl+wheel page zoom is suppressed inside the document viewport only.
+  useEffect(()=>{
+    const root=rootRef.current;
+    if(!root)return;
+    const onWheel=(event:WheelEvent)=>{
+      if(!event.ctrlKey)return;
+      event.preventDefault();
+      event.stopPropagation();
+      const next=nextPointerZoom(currentZoom.current,event.deltaY,event.deltaMode);
+      if(Math.abs(next-currentZoom.current)<.0005)return;
+      const candidate=document.elementFromPoint(event.clientX,event.clientY);
+      const slot=candidate?.closest?.(".view-page-slot") as HTMLElement|null;
+      const selected=slot && root.contains(slot)
+        ?slot
+        :root.querySelector<HTMLElement>('[data-page-number="'+pageNumber+'"]');
+      const rect=selected?.getBoundingClientRect();
+      if(selected && rect && rect.width>0 && rect.height>0){
+        zoomPending.current={
+          pageNumber:Number(selected.dataset.pageNumber??pageNumber),
+          ratioX:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),
+          ratioY:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height)),
+          clientX:event.clientX,clientY:event.clientY
+        };
+      }else zoomPending.current=undefined;
+      currentZoom.current=next;
+      onZoomChange(next);
+    };
+    root.addEventListener("wheel",onWheel,{passive:false});
+    return ()=>root.removeEventListener("wheel",onWheel);
+  },[pageNumber,onZoomChange]);
+
+  // The slot's size updates after PDF.js viewport recalculation. Allow two
+  // frames for React layout and adjust scroll to put the SAME PDF point under
+  // the mouse, including in side-by-side and continuous modes.
+  useEffect(()=>{
+    const pending=zoomPending.current;
+    const root=rootRef.current;
+    if(!root||!pending)return;
+    let first=0,second=0;
+    first=requestAnimationFrame(()=>{
+      second=requestAnimationFrame(()=>{
+        const slot=root.querySelector<HTMLElement>(
+          '[data-page-number="'+pending.pageNumber+'"]'
+        );
+        if(slot){
+          const rect=slot.getBoundingClientRect();
+          root.scrollLeft+=anchoredScrollDelta(
+            pending.clientX,rect.left,rect.width,pending.ratioX
+          );
+          root.scrollTop+=anchoredScrollDelta(
+            pending.clientY,rect.top,rect.height,pending.ratioY
+          );
+        }
+        zoomPending.current=undefined;
+      });
+    });
+    return ()=>{cancelAnimationFrame(first);cancelAnimationFrame(second)};
+  },[zoom]);
+
+  function panStart(event:React.PointerEvent<HTMLDivElement>){
+    // Alt+left drag only; explicitly do NOT bind middle button or Space.
+    if(!event.altKey || event.button!==0 || panPending.current)return;
+    const root=rootRef.current;
+    if(!root)return;
+    event.preventDefault();
+    event.stopPropagation();
+    panPending.current={
+      pointerId:event.pointerId,
+      startX:event.clientX,startY:event.clientY,
+      left:root.scrollLeft,top:root.scrollTop
+    };
+    root.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+  }
+
+  function panMove(event:React.PointerEvent<HTMLDivElement>){
+    const state=panPending.current;
+    const root=rootRef.current;
+    if(!state||!root||state.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopPropagation();
+    const position=panScrollPosition(
+      {left:state.left,top:state.top},
+      {x:event.clientX-state.startX,y:event.clientY-state.startY}
+    );
+    root.scrollLeft=position.left;
+    root.scrollTop=position.top;
+  }
+
+  function panEnd(event:React.PointerEvent<HTMLDivElement>){
+    const state=panPending.current,root=rootRef.current;
+    if(!state||!root||state.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopPropagation();
+    panPending.current=undefined;
+    if(root.hasPointerCapture(event.pointerId)){
+      root.releasePointerCapture(event.pointerId);
+    }
+    setIsPanning(false);
+  }
+
   const onScroll=useCallback(()=>{
     if(!continuous)return;
     if(scrollFrame.current!==undefined)cancelAnimationFrame(scrollFrame.current);
@@ -251,8 +368,13 @@ export function DocumentViewport(props:DocumentViewportProps){
   const effectiveGroup=continuous?focusGroup:0;
 
   return <div ref={rootRef}
-    className={"document-viewport view-scroll view-mode-"+mode}
+    className={"document-viewport view-scroll view-mode-"+mode+
+      (isPanning?" is-panning":"")}
     data-view-mode={mode}
+    onPointerDownCapture={panStart}
+    onPointerMoveCapture={panMove}
+    onPointerUpCapture={panEnd}
+    onPointerCancelCapture={panEnd}
     onScroll={onScroll}
     aria-label="PDF document viewport"
     role="region" tabIndex={0}>
@@ -281,7 +403,7 @@ export function DocumentViewport(props:DocumentViewportProps){
         {events.tool==="callout"?"Click where the callout arrow should point.":
           events.tool==="text"?"Click to place editable text.":
           events.tool==="note"?"Click to leave a comment.":
-          "Select a markup, then drag its box or corner handles to move/resize. Callout tip and elbow grips move independently. Arrow keys nudge focused grips."}
+          "Alt + left-drag to pan; Ctrl + wheel to zoom at pointer. Select a markup to move/resize its box or leader grips."
       </p>
     </div>
   </div>;
