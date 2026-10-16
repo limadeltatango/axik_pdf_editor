@@ -415,7 +415,7 @@ export function DocumentViewport(props:DocumentViewportProps){
           events.tool==="symbol"?"Click to place the selected grouped symbol.":
           ["rectangle","ellipse","line"].includes(events.tool)
             ?"Drag on the page to draw a vector "+events.tool+".":
-          "Alt + left-drag to pan; Ctrl + wheel to zoom at pointer. Select a markup to move/resize its box or leader grips."
+          "Alt + left-drag to pan; Ctrl + wheel to zoom at pointer. Select a markup to move/resize its box or leader grips."}
       </p>
     </div>
   </div>;
