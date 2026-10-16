@@ -6,8 +6,8 @@
 import {PDFArray,PDFDict,PDFDocument,PDFHexString,PDFName,
         PDFNumber,PDFString} from "pdf-lib";
 import {
-  DEFAULT_CALLOUT_STYLE,validateAnnotation,
-  type Annotation,type AnnotationStyle,type Point,type Rect
+  DEFAULT_CALLOUT_STYLE,validateAnnotation,validateSymbolAnnotation,
+  type Annotation,type AnnotationStyle,type SymbolAnnotation,type Point,type Rect
 } from "@axik/document-core";
 
 function str(dict:PDFDict,key:string):string|undefined {
@@ -77,7 +77,7 @@ function parse(dict:PDFDict,pageIndex:number):Annotation|undefined{
   const rawSubtype=dict.lookup(PDFName.of("Subtype"));
   if(!(rawSubtype instanceof PDFName))return undefined;
   const subtype=rawSubtype.asString();
-  if(subtype!=="/FreeText" && subtype!=="/Text")return undefined;
+  if(!["/FreeText","/Text","/Stamp"].includes(subtype))return undefined;
   const text=str(dict,"Contents")??"";
   if(text.length>20000)return undefined;
   const rect=rectangle(nums(dict,"Rect",4));
@@ -87,6 +87,24 @@ function parse(dict:PDFDict,pageIndex:number):Annotation|undefined{
     id:name,sourceName:name,author,createdAt:timestamp,
     updatedAt:timestamp,pageIndex,text
   };
+
+  if(subtype==="/Stamp"){
+    const serialized=str(dict,"AxikSymbol");
+    if(!serialized||serialized.length>32_000)return undefined;
+    let data:unknown;
+    try{data=JSON.parse(serialized)}catch{return undefined}
+    if(!data||typeof data!=="object")return undefined;
+    const raw=data as Partial<SymbolAnnotation> & {version?:number};
+    if(raw.version!==1 || typeof raw.name!=="string" ||
+       typeof raw.templateId!=="string" ||
+       typeof raw.rotation!=="number"||
+       !Array.isArray(raw.primitives))return undefined;
+    return validateSymbolAnnotation({
+      ...common,kind:"symbol",intent:"Stamp",
+      name:raw.name,templateId:raw.templateId,box:rect,
+      rotation:raw.rotation,primitives:raw.primitives
+    });
+  }
 
   if(subtype==="/Text"){
     return validateAnnotation({
