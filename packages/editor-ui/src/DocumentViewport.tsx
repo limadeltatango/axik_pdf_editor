@@ -131,11 +131,11 @@ export function DocumentViewport(props:DocumentViewportProps){
   const previousZoom=useRef(zoom);
   const currentZoom=useRef(zoom);
   currentZoom.current=zoom;
-  const zoomPending=useRef<CursorAnchor>();
+  const zoomPending=useRef<CursorAnchor | undefined>(undefined);
   const panPending=useRef<{
     pointerId:number;startX:number;startY:number;
     left:number;top:number;
-  }>();
+  } | undefined>(undefined);
   const [isPanning,setIsPanning]=useState(false);
   const continuous=isContinuous(mode),twoUp=isTwoUp(mode);
 
