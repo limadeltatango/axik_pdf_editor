@@ -2,7 +2,8 @@ import {
   useCallback,useEffect,useMemo,useRef,useState
 } from "react";
 import type {
-  Annotation,CalloutAnnotation,TextBoxAnnotation,StickyNoteAnnotation,MovableBox
+  Annotation,CalloutAnnotation,TextBoxAnnotation,StickyNoteAnnotation,MovableBox,
+  SymbolAnnotation,SymbolTemplate
 } from "@axik/document-core";
 import {diagnostics} from "@axik/diagnostics";
 import type {PdfDocument,PdfPage} from "./pdf";
@@ -25,13 +26,16 @@ export interface DocumentViewportProps {
   coverAlone:boolean;
   zoom:number;
   onZoomChange:(nextZoom:number)=>void;
-  tool:"select"|"callout"|"text"|"note";
+  tool:"select"|"callout"|"text"|"note"|
+    "rectangle"|"ellipse"|"line"|"symbol";
+  symbolTemplate?:SymbolTemplate;
   annotations:readonly Annotation[];
   selectedAnnotationId?:string;
   onSelect:(id:string)=>void;
   onAddCallout:(value:CalloutAnnotation)=>void;
   onAddText:(value:TextBoxAnnotation)=>void;
   onAddNote:(value:StickyNoteAnnotation)=>void;
+  onAddSymbol:(value:SymbolAnnotation)=>void;
   onMoveBox:(value:MovableBox)=>void;
   onVisiblePage:(index:number)=>void;
   onViewportResize:(width:number,height:number)=>void;
@@ -40,7 +44,8 @@ export interface DocumentViewportProps {
 
 interface SlotProps extends Pick<DocumentViewportProps,
   "pdf"|"zoom"|"tool"|"annotations"|"selectedAnnotationId"|
-  "onSelect"|"onAddCallout"|"onAddText"|"onAddNote"|"onMoveBox"|"onRendered"> {
+  "onSelect"|"onAddCallout"|"onAddText"|"onAddNote"|"onAddSymbol"|
+  "symbolTemplate"|"onMoveBox"|"onRendered"> {
   pageNumber:number;
   enabled:boolean;
   fallbackSize:{width:number;height:number};
@@ -97,12 +102,14 @@ function PageSlot({
     {enabled && page?
       <PageCanvas page={page} pageIndex={pageNumber-1} zoom={zoom}
         tool={events.tool}
+        symbolTemplate={events.symbolTemplate}
         annotations={events.annotations}
         selectedAnnotationId={events.selectedAnnotationId}
         onSelect={events.onSelect}
         onAddCallout={events.onAddCallout}
         onAddText={events.onAddText}
         onAddNote={events.onAddNote}
+        onAddSymbol={events.onAddSymbol}
         onMoveBox={events.onMoveBox}
         onRendered={events.onRendered}/>:
       <div className="view-page-skeleton"
@@ -388,6 +395,7 @@ export function DocumentViewport(props:DocumentViewportProps){
           {group.map(number=><PageSlot key={number}
             pdf={pdf} pageNumber={number} enabled={rendered}
             zoom={zoom} tool={events.tool}
+            symbolTemplate={events.symbolTemplate}
             fallbackSize={referenceSize}
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
@@ -395,6 +403,7 @@ export function DocumentViewport(props:DocumentViewportProps){
             onAddCallout={events.onAddCallout}
             onAddText={events.onAddText}
             onAddNote={events.onAddNote}
+            onAddSymbol={events.onAddSymbol}
             onMoveBox={events.onMoveBox}
             onRendered={events.onRendered}/>)}
         </div>;
@@ -403,6 +412,9 @@ export function DocumentViewport(props:DocumentViewportProps){
         {events.tool==="callout"?"Click where the callout arrow should point.":
           events.tool==="text"?"Click to place editable text.":
           events.tool==="note"?"Click to leave a comment.":
+          events.tool==="symbol"?"Click to place the selected grouped symbol.":
+          ["rectangle","ellipse","line"].includes(events.tool)
+            ?"Drag on the page to draw a vector "+events.tool+".":
           "Alt + left-drag to pan; Ctrl + wheel to zoom at pointer. Select a markup to move/resize its box or leader grips."
       </p>
     </div>
