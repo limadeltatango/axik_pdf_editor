@@ -926,7 +926,68 @@ export function EditorApp({
               <span>{annotation.text}</span>
             </button>
           ))}
-          {selectedAnnotation && <>
+          {selectedAnnotation?.kind==="symbol" && <>
+            <p className="muted">
+              Group: {selectedAnnotation.name} ·
+              {" "+selectedAnnotation.primitives.length} editable vector components.
+              Dimensions are PDF points (not calibrated construction inches).
+            </p>
+            <div className="symbol-instance-fields">
+              {(["width","height"] as const).map(field=>
+                <label key={field}>{field} (pt)
+                  <input type="number" aria-label={"Symbol "+field}
+                    min={5} step={1}
+                    value={Math.round(selectedAnnotation.box[field]*10)/10}
+                    onChange={event=>{
+                      const n=Number(event.target.value);
+                      if(!Number.isFinite(n)||n<5||n>100000)return;
+                      try {
+                        setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                          ...selectedAnnotation,box:{...selectedAnnotation.box,[field]:n},
+                          updatedAt:new Date().toISOString()
+                        }}));
+                      }catch(reason){setError(pdfError(reason))}
+                    }}/>
+                </label>)}
+              <label>Rotation (degrees)
+                <input type="number" aria-label="Symbol rotation"
+                  min={-360} max={360} step={5}
+                  value={selectedAnnotation.rotation}
+                  onChange={event=>{
+                    const n=Number(event.target.value);
+                    if(!Number.isFinite(n)||Math.abs(n)>360)return;
+                    try {
+                      setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                        ...selectedAnnotation,rotation:n,
+                        updatedAt:new Date().toISOString()
+                      }}));
+                    }catch(reason){setError(pdfError(reason))}
+                  }}/>
+              </label>
+            </div>
+            <button onClick={()=>{
+              setEditSymbolInstanceId(selectedAnnotation.id);
+              setShowShapeBuilder(true);
+            }}>Edit individual components…</button>
+            <button onClick={()=>{
+              const copy:SymbolAnnotation={
+                ...selectedAnnotation,id:crypto.randomUUID(),sourceName:undefined,
+                box:{...selectedAnnotation.box,
+                  x:selectedAnnotation.box.x+12,y:selectedAnnotation.box.y+12},
+                primitives:selectedAnnotation.primitives.map(p=>({...p})),
+                createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
+              };
+              setEditor(previous=>applyCommand(previous,{type:"add",annotation:copy}));
+              setSelectedId(copy.id);
+            }}>Duplicate grouped symbol</button>
+            <button className="danger" onClick={()=>{
+              setEditor(previous=>applyCommand(previous,{
+                type:"remove",annotationId:selectedAnnotation.id
+              }));
+              setSelectedId(undefined);
+            }}>Delete symbol</button>
+          </>}
+          {selectedAnnotation && selectedAnnotation.kind!=="symbol" && <>
             <label className="editor-label" htmlFor="callout-text">
               {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
             </label>
@@ -977,6 +1038,28 @@ export function EditorApp({
         annotations={editor.annotations}
         importedAnnotations={session.importedAnnotations} name={session.name}
         onClose={()=>setShowPageOperations(false)} />}
+      {showShapeBuilder && <ShapeBuilderPanel
+        initialTemplate={editSymbolInstanceId
+          ?editor.annotations.find((a):a is SymbolAnnotation=>
+              a.id===editSymbolInstanceId && a.kind==="symbol")
+          :undefined}
+        onClose={()=>setShowShapeBuilder(false)}
+        onUse={template=>{
+          setActiveSymbol(template);
+          if(editSymbolInstanceId){
+            const current=editor.annotations.find(a=>a.id===editSymbolInstanceId);
+            if(current?.kind==="symbol"){
+              setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                ...current,templateId:template.id,name:template.name,text:template.name,
+                primitives:template.primitives.map(p=>({...p})),
+                updatedAt:new Date().toISOString()
+              }}));
+            }
+            setEditSymbolInstanceId(undefined);
+            setTool("select");
+          }else setTool("symbol");
+        }}/>
+      }
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
       } version="0.1.0" onClose={() => setShowDiagnostics(false)} />}
