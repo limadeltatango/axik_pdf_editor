@@ -5,6 +5,7 @@ import {
   DEFAULT_MARGINS, LETTER_PORTRAIT, LEGAL_PORTRAIT,
   TABLOID_PORTRAIT, ARCH_C_PORTRAIT, ARCH_D_PORTRAIT, ARCH_E_PORTRAIT,
   planFixedMedia, printPlanSummary, checkPrinterMedia,
+  resolvePrintPageSelection, type PrintPageMode,
   type PhysicalMedia, type PrintPlan, type SourcePage,
   type InstalledPrinter, type DriverPrinterCapabilities
 } from "@axik/print-plan";
@@ -23,7 +24,7 @@ const MEDIA: PhysicalMedia[] = [
  * physical print completion. It gives a practical mixed-orientation workaround.
  */
 export function PrintPlanPanel({
-  pdf, source, annotations, importedAnnotations, name, onClose, onNativePrint,
+  pdf, source, annotations, importedAnnotations, name, currentPage, onClose, onNativePrint,
   onPrinterList, onPrinterCapabilities
 }: {
   pdf: PdfDocument;
@@ -31,12 +32,15 @@ export function PrintPlanPanel({
   annotations: readonly Annotation[];
   importedAnnotations?: readonly Annotation[];
   name: string;
+  currentPage: number;
   onClose: () => void;
   onNativePrint?: (bytes:Uint8Array)=>Promise<void>;
   onPrinterList?: ()=>Promise<InstalledPrinter[]>;
   onPrinterCapabilities?: (printerName:string)=>Promise<DriverPrinterCapabilities>;
 }) {
   const [medium, setMedium] = useState(MEDIA[0]!.id);
+  const [pageMode,setPageMode]=useState<PrintPageMode>("all");
+  const [pageRange,setPageRange]=useState("");
   const [scale, setScale] = useState<"shrink-to-fit" | "actual-size">("shrink-to-fit");
   const [duplex, setDuplex] = useState<"simplex" | "long-edge" | "short-edge">("simplex");
   const [rasterDpi, setRasterDpi] = useState(144);
@@ -98,7 +102,7 @@ export function PrintPlanPanel({
   useEffect(() => {
     // A prepared file is invalid as soon as any physical print option changes.
     setPrepared(undefined);
-  }, [medium,scale,duplex,rasterDpi,annotations,source]);
+  }, [medium,scale,duplex,rasterDpi,annotations,source,pageMode,pageRange,currentPage]);
 
   useEffect(() => {
     let active = true;
@@ -128,14 +132,23 @@ export function PrintPlanPanel({
 
   let plan: PrintPlan | undefined;
   let planError: string | undefined;
+  let selectedIndices:number[]|undefined;
+  try{
+    selectedIndices=resolvePrintPageSelection({
+      mode:pageMode,currentPage,rangeText:pageRange
+    },pdf.numPages);
+  }catch(reason){
+    planError=reason instanceof Error?reason.message:"Invalid print page selection.";
+  }
   const media = MEDIA.find(paper => paper.id === medium) ?? MEDIA[0]!;
   const selectedCheck=selectedCapabilities
     ? checkPrinterMedia(media,duplex,selectedCapabilities) : undefined;
   const printerMismatch=Boolean(selectedPrinter && selectedCheck &&
     (selectedCheck.paper==="unsupported" || selectedCheck.duplex==="unsupported"));
   try {
-    if (pages) plan = planFixedMedia({
-      pages, media, margins: DEFAULT_MARGINS, scaling: scale, duplex
+    if (pages && selectedIndices && !planError) plan = planFixedMedia({
+      pages: selectedIndices.map(index=>pages[index]!),
+      media, margins: DEFAULT_MARGINS, scaling: scale, duplex
     });
   } catch (reason) {
     planError = reason instanceof Error ? reason.message : "Invalid print options.";
@@ -144,8 +157,12 @@ export function PrintPlanPanel({
   useEffect(() => {
     if (!pages) return;
     try {
+      const selection=resolvePrintPageSelection({
+        mode:pageMode,currentPage,rangeText:pageRange
+      },pdf.numPages);
       const completed = planFixedMedia({
-        pages, media: MEDIA.find(p=>p.id===medium)??MEDIA[0]!,
+        pages:selection.map(index=>pages[index]!),
+        media: MEDIA.find(p=>p.id===medium)??MEDIA[0]!,
         margins:DEFAULT_MARGINS,scaling:scale,duplex
       });
       diagnostics.record("print","PRINT_PLAN_OK","info",{
@@ -154,17 +171,18 @@ export function PrintPlanPanel({
     }catch(reason){
       diagnostics.recordError("print","PRINT_PLAN_FAILED",reason);
     }
-  },[pages,medium,scale,duplex]);
+  },[pages,medium,scale,duplex,pageMode,pageRange,currentPage,pdf.numPages]);
 
   async function prepare() {
-    if(busy || !plan?.logicallyValid)return;
+    if(busy || !plan?.logicallyValid || !selectedIndices)return;
     setError(undefined);
     setBusy(true);
     setProgress("Preparing sheets…");
     const started=performance.now();
     try{
       const result=await preparePrintDocument(source,annotations,{
-        media,margins:DEFAULT_MARGINS,scaling:scale,duplex
+        media,margins:DEFAULT_MARGINS,scaling:scale,duplex,
+        selectedPageIndices:selectedIndices
       },{
         rasterDpi,importedAnnotations,
         onProgress:(current,total)=>setProgress("Rendering print pages "+current+" / "+total)
@@ -203,6 +221,32 @@ export function PrintPlanPanel({
         </div>
         <button onClick={onClose} disabled={busy}>Close</button>
       </header>
+      <div className="print-pages" role="group" aria-label="Pages to print">
+        <strong>Pages to print</strong>
+        <label><input type="radio" name="axik-print-pages" value="all"
+          checked={pageMode==="all"} disabled={busy}
+          onChange={()=>setPageMode("all")} /> All pages ({pdf.numPages})</label>
+        <label><input type="radio" name="axik-print-pages" value="current"
+          checked={pageMode==="current"} disabled={busy}
+          onChange={()=>setPageMode("current")} /> Current page ({currentPage})</label>
+        <label><input type="radio" name="axik-print-pages" value="custom"
+          checked={pageMode==="custom"} disabled={busy}
+          onChange={()=>setPageMode("custom")} /> Custom range</label>
+        {pageMode==="custom"&& <label className="custom-page-range">
+          <span>Page numbers</span>
+          <input type="text" aria-label="Custom page range"
+            value={pageRange} disabled={busy}
+            placeholder="2-5, 8, 11-14"
+            onChange={event=>setPageRange(event.target.value)}
+            autoComplete="off" spellCheck={false}/>
+        </label>}
+        <p className="muted">
+          {selectedIndices
+            ?selectedIndices.length+" source page(s) selected; noncontiguous order is preserved."
+            :"Enter a valid range of source PDF page numbers."}
+          Duplex pairing starts with the first selected page.
+        </p>
+      </div>
       <div className="print-options">
         <label>Paper
           <select value={medium} disabled={busy} onChange={e=>setMedium(e.target.value)}>
@@ -331,7 +375,7 @@ export function PrintPlanPanel({
         </ul>
       </>}
       <p className="diagnostics-warning">
-        Before printing, select {media.label}, Actual Size / 100% and the correct
+        This generated file contains only the selected source pages. Before printing, select {media.label}, Actual Size / 100% and the correct
         duplex setting in the OS print dialog. Physical printer-driver
         enumeration, validated hardware margins, print spool status, and Arch
         drawing sizes are not yet implemented. The preview above shows sheet geometry,
