@@ -448,10 +448,9 @@ export function PageCanvas({
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
     if (!page || !viewport || (tool !== "callout" && tool !== "text" &&
       tool !== "note" && tool !== "symbol") || event.altKey) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const tip = viewportToPdf(viewport.transform, {
-      x: event.clientX - bounds.left, y: event.clientY - bounds.top
-    });
+    // Reuse the rect-size-aware conversion used by drawing/dragging. A
+    // CSS-scaled page must not shift callout tips or stamped fixtures.
+    const tip = getPdfPoint(event.currentTarget,event.clientX,event.clientY);
     const [left = 0, bottom = 0, right = 612, top = 792] = page.view;
     try {
       const pageBounds={ x: left, y: bottom, width: right - left, height: top - bottom };
