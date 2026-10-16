@@ -51,7 +51,7 @@ export function ShapeBuilderPanel({
   const drag=useRef<{
     pointerId:number;id:string;start:{x:number;y:number};
     original:SymbolPrimitive
-  }>();
+  } | undefined>(undefined);
 
   const selected=template.primitives.find(p=>p.id===selectedId);
   const ext=symbolExtents(template.primitives);

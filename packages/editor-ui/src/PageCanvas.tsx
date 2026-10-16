@@ -55,7 +55,7 @@ export function PageCanvas({
     pointerId:number;
     type:"rect"|"ellipse"|"line";
     start:Point;
-  }>();
+  } | undefined>(undefined);
   const [shapePreview,setShapePreview]=useState<{
     type:"rect"|"ellipse"|"line";
     start:Point;end:Point;
@@ -161,7 +161,7 @@ export function PageCanvas({
     event:PointerEvent<SVGElement>,annotation:MovableBox,
     action:DragAction={kind:"box"}
   ){
-    if(tool!=="select" || !viewport || !page || event.button!==0)return;
+    if(tool!=="select" || !viewport || !page || event.button!==0 || event.altKey)return;
     if(action.kind==="leader" && annotation.kind!=="callout")return;
     const svg=event.currentTarget.ownerSVGElement;
     if(!svg)return;
