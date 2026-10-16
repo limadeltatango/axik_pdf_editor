@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
+  type MovableBox, type SymbolAnnotation,type SymbolTemplate,type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -11,6 +12,8 @@ import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
 import { exportEditedPdf,readEditableAnnotations,planAnnotationEdits } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DocumentViewport } from "./DocumentViewport";
+import {ShapeBuilderPanel} from "./ShapeBuilderPanel";
+import {readSymbolLibrary} from "./symbol-library";
 import {
   DEFAULT_VIEW_PREFERENCES,VIEW_MODES,adjacentPage,
   isContinuous,isTwoUp,normalizedViewPreferences,zoomToFit,
@@ -99,7 +102,14 @@ export function EditorApp({
   const [zoomMode,setZoomMode]=useState<ZoomMode>(initialView.zoomMode);
   const [zoom,setZoom] = useState(initialView.zoom);
   const [viewportSize,setViewportSize]=useState({width:900,height:650});
-  const [tool, setTool] = useState<"select" | "callout" | "text" | "note">("select");
+  const [tool, setTool] = useState<
+    "select"|"callout"|"text"|"note"|"rectangle"|"ellipse"|"line"|"symbol"
+  >("select");
+  const [activeSymbol,setActiveSymbol]=useState<SymbolTemplate>(()=>
+    structuredClone(readSymbolLibrary()[0]!)
+  );
+  const [showShapeBuilder,setShowShapeBuilder]=useState(false);
+  const [editSymbolInstanceId,setEditSymbolInstanceId]=useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
@@ -459,7 +469,7 @@ export function EditorApp({
     }
   };
 
-  function moveMarkupBox(annotation: CalloutAnnotation | TextBoxAnnotation) {
+  function moveMarkupBox(annotation: MovableBox) {
     try {
       setEditor(previous=>applyCommand(previous,{
         type:"replace",annotation
@@ -475,6 +485,7 @@ export function EditorApp({
 
   const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
   const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
+  const addSymbol = (annotation: SymbolAnnotation) => addCallout(annotation);
 
   function changeMarkupText(annotation: Annotation, text: string) {
     try {
@@ -798,6 +809,21 @@ export function EditorApp({
         <button aria-pressed={tool === "note"} disabled={!session || documentBusy}
           className={tool === "note" ? "active" : ""}
           onClick={() => setTool("note")}>Comment</button>
+        {(["rectangle","ellipse","line"] as const).map(type=>
+          <button key={type} aria-pressed={tool===type}
+            disabled={!session||documentBusy}
+            className={tool===type?"active":""}
+            onClick={()=>setTool(type)}>
+            {type==="rectangle"?"Rectangle":type==="ellipse"?"Ellipse":"Line"}
+          </button>
+        )}
+        <button aria-pressed={tool==="symbol"} disabled={!session||documentBusy}
+          className={tool==="symbol"?"active":""}
+          onClick={()=>setTool("symbol")}>Stamp symbol</button>
+        <button disabled={!session||documentBusy} onClick={()=>{
+          setEditSymbolInstanceId(undefined);
+          setShowShapeBuilder(true);
+        }}>Symbol Builder…</button>
         <span className="separator" />
         <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
@@ -881,6 +907,7 @@ export function EditorApp({
           selectedAnnotationId={selectedId}
           onSelect={setSelectedId}
           onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
+          onAddSymbol={addSymbol} symbolTemplate={activeSymbol}
           onMoveBox={moveMarkupBox}
           onVisiblePage={onVisiblePage} onViewportResize={viewportResize}
           onRendered={onPageRendered}
@@ -893,7 +920,9 @@ export function EditorApp({
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
               onClick={() => { goToPage(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
-              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
+              <strong>{annotation.kind === "callout" ? "Callout" :
+                annotation.kind==="symbol" ? "Vector symbol" :
+                annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
           ))}
