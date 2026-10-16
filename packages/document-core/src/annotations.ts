@@ -1,6 +1,7 @@
 import {
   clamp, isPoint, isRect, type Point, type Rect
 } from "./geometry";
+import {validateSymbolAnnotation,type SymbolAnnotation} from "./symbols";
 
 export interface AnnotationBase {
   id: string;
@@ -47,7 +48,7 @@ export interface TextBoxAnnotation extends AnnotationBase {
   style: AnnotationStyle;
 }
 
-export type Annotation = CalloutAnnotation | StickyNoteAnnotation | TextBoxAnnotation;
+export type Annotation = CalloutAnnotation | StickyNoteAnnotation | TextBoxAnnotation | SymbolAnnotation;
 export type AnnotationKind = Annotation["kind"];
 
 const MAX_ANNOTATION_TEXT = 20_000;
@@ -81,6 +82,9 @@ export function validateAnnotation(value: Annotation): Annotation {
     throw new RangeError("Annotation timestamps must be valid ISO dates.");
   }
   if (value.text.length > MAX_ANNOTATION_TEXT) throw new RangeError("Annotation text too long.");
+  if(value.kind==="symbol"){
+    return validateSymbolAnnotation(value);
+  }
   if (value.kind === "note") {
     if (!isPoint(value.position)) throw new RangeError("Invalid note position.");
     return value;

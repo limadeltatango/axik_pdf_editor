@@ -12,6 +12,7 @@ on:
       - fix/apdf-52-win32-open-dialog-filter
       - feat/apdf-usability-view-modes-markup-drag
       - feat/apdf-56-markup-controls-performance
+      - feat/apdf-plan-navigation-symbol-builder-print-range
   workflow_dispatch:
 
 permissions:
@@ -24,10 +25,12 @@ concurrency:
 jobs:
   windows-alpha:
     name: Package unsigned Windows alpha
-    runs-on: windows-latest
+    runs-on: [self-hosted, axik-windows-general]
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10

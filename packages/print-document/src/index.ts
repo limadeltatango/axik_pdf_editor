@@ -17,12 +17,17 @@ import {
   normalizeRotation, type PageGeometry
 } from "@axik/document-core";
 import {
-  planFixedMedia, type PlanOptions, type PrintPlan,
+  planFixedMedia, validatePrintIndices, type PlanOptions, type PrintPlan,
   type SourcePage
 } from "@axik/print-plan";
 
 const MAX_INPUT_BYTES = 150 * 1024 * 1024;
 const MAX_PRINT_PAGES = 500;
+
+export type PrintJobSettings = Omit<PlanOptions,"pages"> & {
+  /** Zero-based source indices, ordered exactly as the user requested. */
+  selectedPageIndices?: readonly number[];
+};
 
 export class PrintPreparationError extends Error {
   constructor(message: string, readonly code:
@@ -65,7 +70,7 @@ function pageDescriptor(page: PDFPage, index: number): SourcePage {
 
 /** Built only from the same source bytes as the eventual normalized output. */
 export async function planPrintableDocument(
-  input: Uint8Array, settings: Omit<PlanOptions,"pages">
+  input: Uint8Array, settings: PrintJobSettings
 ): Promise<PrintPlan> {
   if (!input.length || input.length > MAX_INPUT_BYTES) {
     throw new PrintPreparationError("PDF is empty or too large for the print alpha.", "UNSUPPORTED_DOCUMENT");
@@ -74,9 +79,10 @@ export async function planPrintableDocument(
   if (source.getPageCount() > MAX_PRINT_PAGES) {
     throw new PrintPreparationError("The alpha supports at most 500 print pages.", "UNSUPPORTED_DOCUMENT");
   }
+  const indices=validatePrintIndices(source.getPageCount(),settings.selectedPageIndices);
   return planFixedMedia({
     ...settings,
-    pages: source.getPages().map((page,index) => pageDescriptor(page,index))
+    pages: indices.map(index=>pageDescriptor(source.getPage(index),index))
   });
 }
 
@@ -102,7 +108,7 @@ function originForRotation(
 
 export async function normalizeForFixedStockPrinting(
   input: Uint8Array,
-  settings: Omit<PlanOptions, "pages">,
+  settings: PrintJobSettings,
   options: { allowEmptyPages?: boolean } = {}
 ): Promise<NormalizedPrintResult> {
   if (!input.length || input.length > MAX_INPUT_BYTES) {
@@ -113,7 +119,9 @@ export async function normalizeForFixedStockPrinting(
   if (!pages.length || pages.length > MAX_PRINT_PAGES) {
     throw new PrintPreparationError("Unsupported page count (maximum 500).", "UNSUPPORTED_DOCUMENT");
   }
-  for (const page of pages) {
+  const indices=validatePrintIndices(pages.length,settings.selectedPageIndices);
+  for (const index of indices) {
+    const page=pages[index]!;
     if (requiresAnnotationFlattening(page)) {
       throw new PrintPreparationError(
         "PDF contains annotations or form widgets. Vector print preparation would hide them; " +
@@ -122,7 +130,7 @@ export async function normalizeForFixedStockPrinting(
       );
     }
   }
-  const descriptors = pages.map((page,index) => pageDescriptor(page,index));
+  const descriptors = indices.map(index=>pageDescriptor(pages[index]!,index));
   const plan = planFixedMedia({ ...settings, pages: descriptors });
   if (!plan.logicallyValid || plan.warnings.some(w=>w.blocksSubmission)) {
     throw new PrintPreparationError(

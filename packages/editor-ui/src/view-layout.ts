@@ -94,7 +94,7 @@ export function normalizedViewPreferences(value:unknown):ViewPreferences{
     mode:known?raw.mode!:DEFAULT_VIEW_PREFERENCES.mode,
     zoomMode:["custom","fit-width","fit-page"].includes(raw.zoomMode??"")
       ?raw.zoomMode!:DEFAULT_VIEW_PREFERENCES.zoomMode,
-    zoom:typeof zoom==="number"&&Number.isFinite(zoom)&&zoom>=.1&&zoom<=3
+    zoom:typeof zoom==="number"&&Number.isFinite(zoom)&&zoom>=.1&&zoom<=8
       ?zoom:1,
     coverAlone:typeof raw.coverAlone==="boolean"?raw.coverAlone:true
   };

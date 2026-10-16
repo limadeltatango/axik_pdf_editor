@@ -12,6 +12,7 @@ on:
       - fix/apdf-52-win32-open-dialog-filter
       - feat/apdf-usability-view-modes-markup-drag
       - feat/apdf-56-markup-controls-performance
+      - feat/apdf-plan-navigation-symbol-builder-print-range
   workflow_dispatch:
 
 permissions:
@@ -24,10 +25,12 @@ concurrency:
 jobs:
   prototype:
     name: Typecheck, test, build extension
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, axik-linux-general]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -46,7 +49,7 @@ jobs:
       - name: Validate generated Manifest V3 package
         run: node tools/check-extension-package.mjs
       - name: Install Chromium for browser integration test
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
       - name: Regression test Windows desktop Open PDF fallback
         run: |
           set -eu
