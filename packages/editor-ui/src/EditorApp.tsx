@@ -55,7 +55,7 @@ interface Session {
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
 const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 3;
+const MAX_ZOOM = 8;
 const PREF_KEY="axik-pdf-editor-view-v1";
 
 function readViewPreferences():ViewPreferences {
@@ -147,6 +147,11 @@ export function EditorApp({
     setPageNumber(next);
     setNavigationToken(t=>t+1);
   }
+
+  const pointerZoomChange=useCallback((next:number)=>{
+    setZoomMode("custom");
+    setZoom(Math.min(MAX_ZOOM,Math.max(MIN_ZOOM,next)));
+  },[]);
 
   function changeZoom(delta:number){
     setZoomMode("custom");
@@ -871,6 +876,7 @@ export function EditorApp({
           pdf={session.pdf}
           pageNumber={pageNumber} navigationToken={navigationToken}
           mode={viewMode} coverAlone={coverAlone} zoom={zoom}
+          onZoomChange={pointerZoomChange}
           tool={tool} annotations={editor.annotations}
           selectedAnnotationId={selectedId}
           onSelect={setSelectedId}
