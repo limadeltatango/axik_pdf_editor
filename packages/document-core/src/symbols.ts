@@ -45,7 +45,7 @@ export function validateSymbolTemplate(template:SymbolTemplate):SymbolTemplate{
        !p.id || p.id.length>100 ||used.has(p.id) ||
        ![p.x,p.y,p.width,p.height,p.lineWidth].every(Number.isFinite)||
        [p.x,p.y,p.width,p.height].some(v=>Math.abs(v)>MAX_COORD) ||
-       p.width<0||p.height<0||
+       (p.type!=="line" && (p.width<0||p.height<0))||
        (p.type!=="line" && (!p.width||!p.height)) ||
        (p.type==="line" && p.width===0 && p.height===0) ||
        p.lineWidth<=0||p.lineWidth>40 ||
@@ -103,8 +103,8 @@ export function makeSymbolAnnotation(
   validateSymbolTemplate(template);
   if(!isPoint(point)||!isRect(pageBounds))throw new RangeError("Invalid symbol position.");
   const extents=symbolExtents(template.primitives);
-  const width=Math.min(extents.width,pageBounds.width);
-  const height=Math.min(extents.height,pageBounds.height);
+  const width=Math.min(Math.max(5,extents.width),pageBounds.width);
+  const height=Math.min(Math.max(5,extents.height),pageBounds.height);
   const box={
     x:clamp(point.x,pageBounds.x,pageBounds.x+pageBounds.width-width),
     y:clamp(point.y,pageBounds.y,pageBounds.y+pageBounds.height-height),
