@@ -148,7 +148,7 @@ export function resizeMarkupBox<T extends MovableBox>(
     default:throw new RangeError("Invalid resize corner.");
   }
   const box:Rect={x:left,y:bottom,width:right-left,height:top-bottom};
-  if(item.kind==="text"){
+  if(item.kind!=="callout"){
     const result={...item,box} as T;
     validateAnnotation(result);
     return result;
