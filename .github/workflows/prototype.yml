@@ -12,6 +12,7 @@ on:
       - fix/apdf-52-win32-open-dialog-filter
       - feat/apdf-usability-view-modes-markup-drag
       - feat/apdf-56-markup-controls-performance
+      - feat/apdf-plan-navigation-symbol-builder-print-range
   workflow_dispatch:
 
 permissions:
