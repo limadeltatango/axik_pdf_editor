@@ -313,3 +313,23 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
 .markup-tip-handle {fill:#f66a52;stroke:#fff;cursor:crosshair}
 .markup-elbow-handle {fill:#ffe390;stroke:#135a96;cursor:crosshair}
 .markup-grips {opacity:1;pointer-events:visiblePainted}
+
+/* Plan navigation: Alt+left drag is the only alternate pan gesture. */
+.document-viewport.view-scroll.is-panning,
+.document-viewport.view-scroll.is-panning * {
+  cursor:grabbing !important;
+  user-select:none !important;
+}
+.document-viewport.view-scroll.is-panning {scroll-behavior:auto;touch-action:none}
+.print-pages {
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;
+  border:1px solid #4b6381;padding:12px;margin:10px 0;
+  border-radius:8px;background:#1c3147;
+}
+.print-pages>strong{width:100%;font-size:13px}
+.print-pages label{display:inline-flex;align-items:center;gap:7px;font-size:12px}
+.print-pages .custom-page-range{width:100%;align-items:center}
+.print-pages input[type="text"]{min-width:200px;max-width:100%;padding:8px;
+ border:1px solid #58789c;border-radius:6px;background:#203750;color:#fff}
+.print-pages input[type="radio"]{accent-color:#4292ee}
+.print-pages p{width:100%;margin:0}
