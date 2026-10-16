@@ -932,6 +932,7 @@ export function EditorApp({
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
+        currentPage={pageNumber}
         importedAnnotations={session.importedAnnotations}
         onNativePrint={onNativePrint}
         onPrinterList={onPrinterList} onPrinterCapabilities={onPrinterCapabilities}
