@@ -2,7 +2,8 @@ import {useRef,useState,type PointerEvent} from "react";
 import {
   kitchenLinearLightTemplate,symbolExtents,
   updateSymbolComponent,validateSymbolTemplate,
-  type SymbolTemplate,type SymbolPrimitive,type SymbolPrimitiveType
+  type SymbolTemplate,type SymbolPrimitive,type SymbolPrimitiveType,
+  type SymbolAnnotation
 } from "@axik/document-core";
 import {
   readSymbolLibrary,saveSymbolTemplate,deleteSymbolTemplate
@@ -26,17 +27,23 @@ function nextComponent(type:SymbolPrimitiveType):SymbolPrimitive{
   };
 }
 export function ShapeBuilderPanel({
-  onClose,onUse
+  onClose,onUse,initialTemplate
 }:{
   onClose:()=>void;
   onUse:(template:SymbolTemplate)=>void;
+  initialTemplate?:SymbolAnnotation;
 }){
   const [library,setLibrary]=useState(readSymbolLibrary);
   const [template,setTemplate]=useState<SymbolTemplate>(()=>
-    structuredClone(kitchenLinearLightTemplate())
+    initialTemplate?{
+      version:1,id:initialTemplate.templateId,
+      name:initialTemplate.name,
+      primitives:initialTemplate.primitives.map(p=>({...p}))
+    }:structuredClone(kitchenLinearLightTemplate())
   );
   const [selectedId,setSelectedId]=useState<string>(
-    kitchenLinearLightTemplate().primitives[0]!.id
+    initialTemplate?.primitives[0]?.id ??
+      kitchenLinearLightTemplate().primitives[0]!.id
   );
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
