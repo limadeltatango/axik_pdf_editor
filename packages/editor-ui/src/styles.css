@@ -313,3 +313,73 @@ textarea { padding: 10px; color: #ecf4fb; border: 1px solid #536c86; border-radi
 .markup-tip-handle {fill:#f66a52;stroke:#fff;cursor:crosshair}
 .markup-elbow-handle {fill:#ffe390;stroke:#135a96;cursor:crosshair}
 .markup-grips {opacity:1;pointer-events:visiblePainted}
+
+/* Plan navigation: Alt+left drag is the only alternate pan gesture. */
+.document-viewport.view-scroll.is-panning,
+.document-viewport.view-scroll.is-panning * {
+  cursor:grabbing !important;
+  user-select:none !important;
+}
+.document-viewport.view-scroll.is-panning {scroll-behavior:auto;touch-action:none}
+.print-pages {
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;
+  border:1px solid #4b6381;padding:12px;margin:10px 0;
+  border-radius:8px;background:#1c3147;
+}
+.print-pages>strong{width:100%;font-size:13px}
+.print-pages label{display:inline-flex;align-items:center;gap:7px;font-size:12px}
+.print-pages .custom-page-range{width:100%;align-items:center}
+.print-pages input[type="text"]{min-width:200px;max-width:100%;padding:8px;
+ border:1px solid #58789c;border-radius:6px;background:#203750;color:#fff}
+.print-pages input[type="radio"]{accent-color:#4292ee}
+.print-pages p{width:100%;margin:0}
+
+/* Interactive vector construction annotations and compound-symbol workbench. */
+.drawing-preview{pointer-events:none;stroke-dasharray:6 3;opacity:.95}
+.shape-builder{
+  width:min(1020px,98vw);max-height:94vh;overflow:auto;
+  padding:20px;border-radius:12px;background:#1a2c40;
+  border:1px solid #496887;box-shadow:0 30px 70px #050d16dd;
+}
+.symbol-builder-header {display:grid;grid-template-columns:1fr 2fr;gap:12px}
+.symbol-builder-header label,.symbol-configuration label,
+.symbol-instance-fields label {display:flex;flex-direction:column;gap:6px;
+ font-size:12px;color:#dceaf7}
+.symbol-builder-header select,.symbol-builder-header input,
+.symbol-configuration select,.symbol-configuration input,
+.symbol-instance-fields input {
+ background:#233b55;color:#fff;padding:7px;border:1px solid #527397;
+ border-radius:5px;min-width:0;
+}
+.symbol-workbench {display:grid;grid-template-columns:minmax(250px,1.2fr)
+ minmax(260px,1fr);gap:18px;margin:16px 0}
+.symbol-preview svg {width:100%;min-height:240px;max-height:390px;
+ border:1px solid #557393;border-radius:8px;touch-action:none}
+.symbol-preview .symbol-part {cursor:move;pointer-events:all}
+.symbol-preview .symbol-part.selected {stroke:#1d76e3;
+ stroke-width:2;filter:drop-shadow(0 0 2px #69b7ff)}
+.symbol-preview p{font-size:12px;margin-top:7px}
+.symbol-configuration{display:flex;flex-direction:column;gap:12px}
+.symbol-configuration select[size]{height:auto;min-height:50px}
+.symbol-builder-toolbar{display:flex;flex-wrap:wrap;gap:6px}
+.symbol-builder-toolbar button {padding:6px 8px;font-size:11px}
+.symbol-numeric-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:8px}
+.symbol-numeric-grid input {width:100%}
+.symbol-colors{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.symbol-colors label{font-size:11px}
+.symbol-colors input[type="color"]{height:30px;width:62px;padding:2px}
+.symbol-instance-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:8px;margin:10px 0}
+.symbol-instance-fields input{width:100%}
+.symbol-shape-style {margin:12px 0;padding:12px 0 2px;
+ border-top:1px solid #405977}
+.symbol-shape-style>strong {font-size:12px;color:#f2f7fc}
+.symbol-shape-style input[type="color"] {height:34px;padding:2px}
+.symbol-shape-style input[type="checkbox"] {
+ width:18px;height:18px;align-self:flex-start
+}
+@media(max-width:720px){
+ .symbol-workbench,.symbol-builder-header{grid-template-columns:1fr}
+ .shape-builder{padding:12px}
+}

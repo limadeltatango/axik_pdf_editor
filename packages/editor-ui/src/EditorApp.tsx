@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type EditorState
+  updateSymbolComponent,validateSymbolAnnotation,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
+  type MovableBox, type SymbolAnnotation,type SymbolTemplate,type SymbolPrimitive,type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -11,6 +13,8 @@ import { diagnostics, fileSizeBucketMiB } from "@axik/diagnostics";
 import { exportEditedPdf,readEditableAnnotations,planAnnotationEdits } from "@axik/pdf-writer";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DocumentViewport } from "./DocumentViewport";
+import {ShapeBuilderPanel} from "./ShapeBuilderPanel";
+import {readSymbolLibrary} from "./symbol-library";
 import {
   DEFAULT_VIEW_PREFERENCES,VIEW_MODES,adjacentPage,
   isContinuous,isTwoUp,normalizedViewPreferences,zoomToFit,
@@ -55,7 +59,7 @@ interface Session {
 
 const MAX_LOCAL_PDF_BYTES = 512 * 1024 * 1024;
 const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 3;
+const MAX_ZOOM = 8;
 const PREF_KEY="axik-pdf-editor-view-v1";
 
 function readViewPreferences():ViewPreferences {
@@ -99,7 +103,14 @@ export function EditorApp({
   const [zoomMode,setZoomMode]=useState<ZoomMode>(initialView.zoomMode);
   const [zoom,setZoom] = useState(initialView.zoom);
   const [viewportSize,setViewportSize]=useState({width:900,height:650});
-  const [tool, setTool] = useState<"select" | "callout" | "text" | "note">("select");
+  const [tool, setTool] = useState<
+    "select"|"callout"|"text"|"note"|"rectangle"|"ellipse"|"line"|"symbol"
+  >("select");
+  const [activeSymbol,setActiveSymbol]=useState<SymbolTemplate>(()=>
+    structuredClone(readSymbolLibrary()[0]!)
+  );
+  const [showShapeBuilder,setShowShapeBuilder]=useState(false);
+  const [editSymbolInstanceId,setEditSymbolInstanceId]=useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
   const [editor, setEditor] = useState<EditorState>(() => initialEditorState());
   const [recovery, setRecovery] = useState<DraftRecord>();
@@ -147,6 +158,11 @@ export function EditorApp({
     setPageNumber(next);
     setNavigationToken(t=>t+1);
   }
+
+  const pointerZoomChange=useCallback((next:number)=>{
+    setZoomMode("custom");
+    setZoom(Math.min(MAX_ZOOM,Math.max(MIN_ZOOM,next)));
+  },[]);
 
   function changeZoom(delta:number){
     setZoomMode("custom");
@@ -454,7 +470,7 @@ export function EditorApp({
     }
   };
 
-  function moveMarkupBox(annotation: CalloutAnnotation | TextBoxAnnotation) {
+  function moveMarkupBox(annotation: MovableBox) {
     try {
       setEditor(previous=>applyCommand(previous,{
         type:"replace",annotation
@@ -470,6 +486,7 @@ export function EditorApp({
 
   const addText = (annotation: TextBoxAnnotation) => addCallout(annotation);
   const addNote = (annotation: StickyNoteAnnotation) => addCallout(annotation);
+  const addSymbol = (annotation: SymbolAnnotation) => addCallout(annotation);
 
   function changeMarkupText(annotation: Annotation, text: string) {
     try {
@@ -484,6 +501,30 @@ export function EditorApp({
 
   const selectedAnnotation: Annotation | undefined =
     editor.annotations.find((annotation) => annotation.id === selectedId);
+
+  // Basic vector markup should be as easy to style as a callout: the full
+  // compound builder is needed only when there are multiple primitives.
+  function changeSingleShapeStyle(
+    annotation:SymbolAnnotation,changes:Partial<Omit<SymbolPrimitive,"id">>
+  ){
+    if(annotation.primitives.length!==1)return;
+    try{
+      const existing=annotation.primitives[0]!;
+      const updated=updateSymbolComponent({
+        version:1,id:annotation.templateId,name:annotation.name,
+        primitives:annotation.primitives
+      },existing.id,changes);
+      const revised=validateSymbolAnnotation({
+        ...annotation,primitives:updated.primitives,
+        updatedAt:new Date().toISOString()
+      });
+      setEditor(prev=>applyCommand(prev,{type:"replace",annotation:revised}));
+      setError(undefined);
+    }catch(reason){
+      setError(pdfError(reason));
+    }
+  }
+
   const dirty = hasEdits(editor);
   const documentBusy=loading || importingAnnotations;
 
@@ -793,6 +834,21 @@ export function EditorApp({
         <button aria-pressed={tool === "note"} disabled={!session || documentBusy}
           className={tool === "note" ? "active" : ""}
           onClick={() => setTool("note")}>Comment</button>
+        {(["rectangle","ellipse","line"] as const).map(type=>
+          <button key={type} aria-pressed={tool===type}
+            disabled={!session||documentBusy}
+            className={tool===type?"active":""}
+            onClick={()=>setTool(type)}>
+            {type==="rectangle"?"Rectangle":type==="ellipse"?"Ellipse":"Line"}
+          </button>
+        )}
+        <button aria-pressed={tool==="symbol"} disabled={!session||documentBusy}
+          className={tool==="symbol"?"active":""}
+          onClick={()=>setTool("symbol")}>Stamp symbol</button>
+        <button disabled={!session||documentBusy} onClick={()=>{
+          setEditSymbolInstanceId(undefined);
+          setShowShapeBuilder(true);
+        }}>Symbol Builder…</button>
         <span className="separator" />
         <button disabled={documentBusy || !editor.undoStack.length} onClick={() => setEditor(undo)}>Undo</button>
         <button disabled={documentBusy || !editor.redoStack.length} onClick={() => setEditor(redo)}>Redo</button>
@@ -871,10 +927,12 @@ export function EditorApp({
           pdf={session.pdf}
           pageNumber={pageNumber} navigationToken={navigationToken}
           mode={viewMode} coverAlone={coverAlone} zoom={zoom}
+          onZoomChange={pointerZoomChange}
           tool={tool} annotations={editor.annotations}
           selectedAnnotationId={selectedId}
           onSelect={setSelectedId}
           onAddCallout={addCallout} onAddText={addText} onAddNote={addNote}
+          onAddSymbol={addSymbol} symbolTemplate={activeSymbol}
           onMoveBox={moveMarkupBox}
           onVisiblePage={onVisiblePage} onViewportResize={viewportResize}
           onRendered={onPageRendered}
@@ -887,11 +945,115 @@ export function EditorApp({
             <button key={annotation.id}
               className={"comment-item" + (annotation.id === selectedId ? " selected" : "")}
               onClick={() => { goToPage(annotation.pageIndex + 1); setSelectedId(annotation.id); }}>
-              <strong>{annotation.kind === "callout" ? "Callout" : annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
+              <strong>{annotation.kind === "callout" ? "Callout" :
+                annotation.kind==="symbol" ? "Vector symbol" :
+                annotation.kind==="text" ? "Text" : "Note"} · Page {annotation.pageIndex + 1}</strong>
               <span>{annotation.text}</span>
             </button>
           ))}
-          {selectedAnnotation && <>
+          {selectedAnnotation?.kind==="symbol" && <>
+            <p className="muted">
+              Group: {selectedAnnotation.name} ·
+              {" "+selectedAnnotation.primitives.length} editable vector components.
+              Dimensions are PDF points (not calibrated construction inches).
+            </p>
+            <div className="symbol-instance-fields">
+              {(["width","height"] as const).map(field=>
+                <label key={field}>{field} (pt)
+                  <input type="number" aria-label={"Symbol "+field}
+                    min={5} step={1}
+                    value={Math.round(selectedAnnotation.box[field]*10)/10}
+                    onChange={event=>{
+                      const n=Number(event.target.value);
+                      if(!Number.isFinite(n)||n<5||n>100000)return;
+                      try {
+                        setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                          ...selectedAnnotation,box:{...selectedAnnotation.box,[field]:n},
+                          updatedAt:new Date().toISOString()
+                        }}));
+                      }catch(reason){setError(pdfError(reason))}
+                    }}/>
+                </label>)}
+              <label>Rotation (degrees)
+                <input type="number" aria-label="Symbol rotation"
+                  min={-360} max={360} step={5}
+                  value={selectedAnnotation.rotation}
+                  onChange={event=>{
+                    const n=Number(event.target.value);
+                    if(!Number.isFinite(n)||Math.abs(n)>360)return;
+                    try {
+                      setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                        ...selectedAnnotation,rotation:n,
+                        updatedAt:new Date().toISOString()
+                      }}));
+                    }catch(reason){setError(pdfError(reason))}
+                  }}/>
+              </label>
+            </div>
+            {selectedAnnotation.primitives.length===1 && (()=>{
+              const primitive=selectedAnnotation.primitives[0]!;
+              return <section className="symbol-shape-style"
+                aria-label="Basic vector shape appearance">
+                <strong>Shape appearance</strong>
+                <div className="symbol-instance-fields">
+                  <label>Stroke width (pt)
+                    <input type="number" aria-label="Vector stroke width"
+                      min={0.1} max={40} step={0.5}
+                      value={primitive.lineWidth}
+                      onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                        lineWidth:Number(event.target.value)
+                      })}/>
+                  </label>
+                  <label>Stroke color
+                    <input type="color" aria-label="Vector stroke color"
+                      value={primitive.stroke}
+                      onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                        stroke:event.target.value
+                      })}/>
+                  </label>
+                  {primitive.type!=="line" && <>
+                    <label>Fill color
+                      <input type="color" aria-label="Vector fill color"
+                        disabled={primitive.fill==="none"}
+                        value={primitive.fill==="none"?"#ffffff":primitive.fill}
+                        onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                          fill:event.target.value
+                        })}/>
+                    </label>
+                    <label>No fill
+                      <input type="checkbox" aria-label="Vector no fill"
+                        checked={primitive.fill==="none"}
+                        onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                          fill:event.target.checked?"none":"#ffffff"
+                        })}/>
+                    </label>
+                  </>}
+                </div>
+              </section>;
+            })()}
+            <button onClick={()=>{
+              setEditSymbolInstanceId(selectedAnnotation.id);
+              setShowShapeBuilder(true);
+            }}>Edit individual components…</button>
+            <button onClick={()=>{
+              const copy:SymbolAnnotation={
+                ...selectedAnnotation,id:crypto.randomUUID(),sourceName:undefined,
+                box:{...selectedAnnotation.box,
+                  x:selectedAnnotation.box.x+12,y:selectedAnnotation.box.y+12},
+                primitives:selectedAnnotation.primitives.map(p=>({...p})),
+                createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
+              };
+              setEditor(previous=>applyCommand(previous,{type:"add",annotation:copy}));
+              setSelectedId(copy.id);
+            }}>Duplicate grouped symbol</button>
+            <button className="danger" onClick={()=>{
+              setEditor(previous=>applyCommand(previous,{
+                type:"remove",annotationId:selectedAnnotation.id
+              }));
+              setSelectedId(undefined);
+            }}>Delete symbol</button>
+          </>}
+          {selectedAnnotation && selectedAnnotation.kind!=="symbol" && <>
             <label className="editor-label" htmlFor="callout-text">
               {selectedAnnotation.kind === "callout" ? "Callout text" : selectedAnnotation.kind==="text" ? "New text" : "Comment"}
             </label>
@@ -925,13 +1087,15 @@ export function EditorApp({
             <p>{dirty ? journalStatus : "No unsaved annotations"}</p>
             <p className="muted">Quick Export never overwrites. Save As selects a new file;
               Save overwrites a user-picked source only after a separate verified backup.
-              Long text, fonts and imported-callout editing are still limited. Printing,
+              Long text, fonts and imported-callout editing remain limited. Print-ready
+              PDF preparation is available, but native driver-controlled spooling,
               real existing-text editing and secure redaction are not implemented.</p>
           </div>
         </aside>
       </div>
       {showPrintPlan && session && <PrintPlanPanel pdf={session.pdf}
         source={session.source} annotations={editor.annotations} name={session.name}
+        currentPage={pageNumber}
         importedAnnotations={session.importedAnnotations}
         onNativePrint={onNativePrint}
         onPrinterList={onPrinterList} onPrinterCapabilities={onPrinterCapabilities}
@@ -941,6 +1105,28 @@ export function EditorApp({
         annotations={editor.annotations}
         importedAnnotations={session.importedAnnotations} name={session.name}
         onClose={()=>setShowPageOperations(false)} />}
+      {showShapeBuilder && <ShapeBuilderPanel
+        initialTemplate={editSymbolInstanceId
+          ?editor.annotations.find((a):a is SymbolAnnotation=>
+              a.id===editSymbolInstanceId && a.kind==="symbol")
+          :undefined}
+        onClose={()=>setShowShapeBuilder(false)}
+        onUse={template=>{
+          setActiveSymbol(template);
+          if(editSymbolInstanceId){
+            const current=editor.annotations.find(a=>a.id===editSymbolInstanceId);
+            if(current?.kind==="symbol"){
+              setEditor(prev=>applyCommand(prev,{type:"replace",annotation:{
+                ...current,templateId:template.id,name:template.name,text:template.name,
+                primitives:template.primitives.map(p=>({...p})),
+                updatedAt:new Date().toISOString()
+              }}));
+            }
+            setEditSymbolInstanceId(undefined);
+            setTool("select");
+          }else setTool("symbol");
+        }}/>
+      }
       {showDiagnostics && <DiagnosticsPanel runtime={
         environment === "desktop" ? "desktop" : "chromium-extension"
       } version="0.1.0" onClose={() => setShowDiagnostics(false)} />}

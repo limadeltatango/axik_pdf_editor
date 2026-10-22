@@ -4,7 +4,8 @@ import {
 } from "pdf-lib";
 import {
   calloutToStandardPayload, validateAnnotation,
-  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type Point
+  symbolTransform,
+  type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation, type SymbolAnnotation, type Point
 } from "@axik/document-core";
 
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
@@ -380,6 +381,89 @@ function addStickyNote(doc:PDFDocument,font:PDFFont,n:StickyNoteAnnotation):void
   addOrReplace(doc,page,n,ref);
 }
 
+
+function rgbTriplet(color:string):string{
+  return hexToRgb(color).map(safePdfNumber).join(" ");
+}
+function symbolDrawingCommands(a:SymbolAnnotation):string {
+  const matrix=symbolTransform(a);
+  const fmt=safePdfNumber;
+  const out=[
+    "q",
+    [matrix.a,matrix.b,matrix.c,matrix.d,matrix.e,matrix.f]
+      .map(fmt).join(" ")+" cm"
+  ];
+  const k=.5522847498307936;
+  for(const p of a.primitives){
+    out.push("q",fmt(p.lineWidth)+" w",rgbTriplet(p.stroke)+" RG");
+    if(p.fill!=="none")out.push(rgbTriplet(p.fill)+" rg");
+    const {x,y,width:w,height:h}=p;
+    if(p.type==="rect"){
+      out.push([x,y,w,h].map(fmt).join(" ")+" re");
+    }else if(p.type==="line"){
+      out.push(fmt(x)+" "+fmt(y)+" m",
+        fmt(x+w)+" "+fmt(y+h)+" l");
+    }else {
+      const mx=x+w/2,my=y+h/2,rx=w/2,ry=h/2;
+      out.push(fmt(mx+rx)+" "+fmt(my)+" m");
+      const sections=[
+        [mx+rx,my+k*ry,mx+k*rx,my+ry,mx,my+ry],
+        [mx-k*rx,my+ry,mx-rx,my+k*ry,mx-rx,my],
+        [mx-rx,my-k*ry,mx-k*rx,my-ry,mx,my-ry],
+        [mx+k*rx,my-ry,mx+rx,my-k*ry,mx+rx,my]
+      ];
+      for(const section of sections)out.push(section.map(fmt).join(" ")+" c");
+      out.push("h");
+    }
+    out.push(p.type==="line"||p.fill==="none"?"S":"B","Q");
+  }
+  out.push("Q");
+  return out.join("\n")+"\n";
+}
+
+/**
+ * A real vector appearance remains visible in Adobe/PDF-XChange.
+ * Axik adds a namespaced metadata dictionary key for lossless component
+ * editing, since /Stamp alone has no standard reusable grouped-shape model.
+ * Third-party tools may preserve the /AP but discard this custom metadata.
+ */
+function addSymbolStamp(doc:PDFDocument,a:SymbolAnnotation):void{
+  validateAnnotation(a);
+  if(a.pageIndex>=doc.getPageCount())throw new RangeError("Symbol page does not exist.");
+  const context=doc.context;
+  const page=doc.getPage(a.pageIndex);
+  const metadata=JSON.stringify({
+    version:1,templateId:a.templateId,name:a.name,
+    rotation:a.rotation,primitives:a.primitives
+  });
+  if(metadata.length>32_000){
+    throw new RangeError("Symbol metadata is too large for this alpha.");
+  }
+  const content=context.register(context.flateStream(
+    symbolDrawingCommands(a),{
+      Type:PDFName.of("XObject"),
+      Subtype:PDFName.of("Form"),
+      FormType:1,
+      BBox:[0,0,a.box.width,a.box.height],
+      Resources:{}
+    }
+  ));
+  const rect=[
+    a.box.x,a.box.y,a.box.x+a.box.width,a.box.y+a.box.height
+  ];
+  const state=context.obj({
+    Type:PDFName.of("Annot"),Subtype:PDFName.of("Stamp"),
+    Name:PDFName.of("Draft"),Rect:rect,
+    Contents:PDFHexString.fromText(a.name),
+    T:PDFHexString.fromText((a.author||"Axik PDF").slice(0,80)),
+    NM:PDFHexString.fromText(a.id),
+    M:PDFString.of(isoPdfDate(new Date(a.updatedAt))),
+    F:4,AP:{N:content},
+    AxikSymbol:PDFHexString.fromText(metadata)
+  });
+  addOrReplace(doc,page,a,context.register(state));
+}
+
 /**
  * ALPHA: Write PDF-native, editable FreeText callout dictionaries and appearance
  * streams for a bounded source PDF. Visual rendering and interoperability with
@@ -414,6 +498,10 @@ export async function exportEditedPdf(
   for (const annotation of supported) {
     if(annotation.kind==="note"){
       addStickyNote(doc,font,annotation);
+      continue;
+    }
+    if(annotation.kind==="symbol"){
+      addSymbolStamp(doc,annotation);
       continue;
     }
     if (annotation.style.opacity !== 1) {

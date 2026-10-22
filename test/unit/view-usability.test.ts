@@ -7,7 +7,7 @@ import {
 } from "@axik/document-core";
 import {
   groupVisiblePages,spreadForPage,adjacentPage,pageGroupIndex,
-  zoomToFit,normalizedViewPreferences,MAX_ACTIVE_VIEW_PAGES
+  zoomToFit,normalizedViewPreferences,scaledPageSize,MAX_ACTIVE_VIEW_PAGES
 } from "../../packages/editor-ui/src/view-layout";
 import {budgetCanvas,MAX_PAGE_RASTER_PIXELS} from "../../packages/editor-ui/src/render-sizing";
 
@@ -87,6 +87,22 @@ test("zoom fit modes account for spread width without zooming beyond valid bound
   assert.ok(spread<=single);
   assert.ok(zoomToFit(612,792,1200,760,"fit-width",false)>1);
   assert.equal(normalizedViewPreferences({mode:"invalid",zoom:99}).mode,"single");
+});
+
+test("virtualized PDF page placeholders rescale from intrinsic dimensions without stale zoom drift",()=>{
+  const letter={width:612,height:792};
+  const landscape={width:1224,height:792};
+  const first=scaledPageSize(letter,1);
+  const doubled=scaledPageSize(letter,2);
+  const back=scaledPageSize(letter,1);
+  assert.deepEqual(first,back);
+  assert.deepEqual(doubled,{width:1224,height:1584});
+  assert.deepEqual(scaledPageSize(landscape,1.4),{
+    width:1713.6,height:1108.8
+  });
+  assert.throws(()=>scaledPageSize(letter,0),RangeError);
+  assert.throws(()=>scaledPageSize({width:0,height:792},1),RangeError);
+  assert.throws(()=>scaledPageSize({width:NaN,height:792},1),RangeError);
 });
 
 test("raster size is bounded even on Arch E at 200% scale and 4K DPR",()=>{

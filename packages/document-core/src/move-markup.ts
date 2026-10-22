@@ -4,8 +4,9 @@ import {
 import {
   validateAnnotation, type CalloutAnnotation, type TextBoxAnnotation
 } from "./annotations";
+import type {SymbolAnnotation} from "./symbols";
 
-export type MovableBox = CalloutAnnotation | TextBoxAnnotation;
+export type MovableBox = CalloutAnnotation | TextBoxAnnotation | SymbolAnnotation;
 
 function closestBoxAnchor(box:Rect, tip:Point):Point {
   // Prefer the geometrically closest point on the perimeter. This keeps
@@ -45,7 +46,7 @@ export function relocateMarkupBox<T extends MovableBox>(
     x:clamp(item.box.x+delta.x,bounds.x,bounds.x+bounds.width-item.box.width),
     y:clamp(item.box.y+delta.y,bounds.y,bounds.y+bounds.height-item.box.height)
   };
-  if(item.kind==="text"){
+  if(item.kind!=="callout"){
     const result={...item,box} as T;
     validateAnnotation(result);
     return result;
@@ -147,7 +148,7 @@ export function resizeMarkupBox<T extends MovableBox>(
     default:throw new RangeError("Invalid resize corner.");
   }
   const box:Rect={x:left,y:bottom,width:right-left,height:top-bottom};
-  if(item.kind==="text"){
+  if(item.kind!=="callout"){
     const result={...item,box} as T;
     validateAnnotation(result);
     return result;

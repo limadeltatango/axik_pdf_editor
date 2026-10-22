@@ -319,3 +319,5 @@ export function placementToSheetMatrix(placement: PagePlacement): Matrix {
   if (sheetRotation === 0) return [scale, 0, 0, scale, x, y];
   return [0, scale, -scale, 0, x + sourceHeight * scale, y];
 }
+
+export * from "./page-selection";

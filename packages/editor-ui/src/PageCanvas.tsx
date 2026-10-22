@@ -3,6 +3,7 @@ import {
   newCallout, newTextBox, newStickyNote, pdfToViewport, transformedRect, viewportToPdf,
   relocateMarkupBox, nudgeMarkupBox, resizeMarkupBox,
   positionCalloutHandle,nudgeCalloutHandle,
+  makeSymbolAnnotation,symbolTransform,type SymbolTemplate,type SymbolAnnotation,
   type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
   type MovableBox,type CalloutHandle,type BoxResizeCorner,type Rect,type Matrix,type Point
 } from "@axik/document-core";
@@ -14,13 +15,16 @@ export interface PageCanvasProps {
   page: PdfPage | undefined;
   pageIndex: number;
   zoom: number;
-  tool: "select" | "callout" | "text" | "note";
+  tool: "select" | "callout" | "text" | "note" |
+    "rectangle" | "ellipse" | "line" | "symbol";
+  symbolTemplate?:SymbolTemplate;
   annotations: readonly Annotation[];
   selectedAnnotationId?: string;
   onSelect: (id: string) => void;
   onAddCallout: (annotation: CalloutAnnotation) => void;
   onAddText: (annotation: TextBoxAnnotation) => void;
   onAddNote: (annotation: StickyNoteAnnotation) => void;
+  onAddSymbol: (annotation: SymbolAnnotation) => void;
   /** Commit after pointer up or keyboard nudge; one Undo entry per move. */
   onMoveBox: (annotation: MovableBox) => void;
   onRendered?: (pageIndex:number)=>void;
@@ -40,13 +44,22 @@ function leaderCoordinates(leader: readonly Point[], transform: Matrix): string 
 }
 
 export function PageCanvas({
-  page, pageIndex, zoom, tool, annotations, selectedAnnotationId,
-  onSelect, onAddCallout, onAddText, onAddNote, onMoveBox,onRendered
+  page, pageIndex, zoom, tool, symbolTemplate, annotations, selectedAnnotationId,
+  onSelect, onAddCallout, onAddText, onAddNote, onAddSymbol, onMoveBox,onRendered
 }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<ViewportInfo>();
   const [error, setError] = useState<string>();
   const [dragPreview, setDragPreview] = useState<MovableBox>();
+  const shapeStart=useRef<{
+    pointerId:number;
+    type:"rect"|"ellipse"|"line";
+    start:Point;
+  } | undefined>(undefined);
+  const [shapePreview,setShapePreview]=useState<{
+    type:"rect"|"ellipse"|"line";
+    start:Point;end:Point;
+  }>();
   type DragAction = {kind:"box"}
     | {kind:"resize";corner:BoxResizeCorner}
     | {kind:"leader";handle:CalloutHandle};
@@ -148,7 +161,7 @@ export function PageCanvas({
     event:PointerEvent<SVGElement>,annotation:MovableBox,
     action:DragAction={kind:"box"}
   ){
-    if(tool!=="select" || !viewport || !page || event.button!==0)return;
+    if(tool!=="select" || !viewport || !page || event.button!==0 || event.altKey)return;
     if(action.kind==="leader" && annotation.kind!=="callout")return;
     const svg=event.currentTarget.ownerSVGElement;
     if(!svg)return;
@@ -362,12 +375,82 @@ export function PageCanvas({
     </g>;
   }
 
+
+  function shapePointerDown(event:PointerEvent<SVGSVGElement>){
+    if(!page||!viewport || !["rectangle","ellipse","line"].includes(tool) ||
+       event.altKey || event.button!==0)return;
+    event.preventDefault();
+    event.stopPropagation();
+    try{
+      const start=getPdfPoint(event.currentTarget,event.clientX,event.clientY);
+      const type=tool==="rectangle"?"rect":tool as "ellipse"|"line";
+      shapeStart.current={pointerId:event.pointerId,type,start};
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setShapePreview({type,start,end:start});
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Cannot start vector shape.");
+    }
+  }
+
+  function shapePointerMove(event:PointerEvent<SVGSVGElement>){
+    const state=shapeStart.current;
+    if(!state||state.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    try{
+      const end=getPdfPoint(event.currentTarget,event.clientX,event.clientY);
+      setShapePreview({type:state.type,start:state.start,end});
+    }catch{/* cursor is outside drawable page */}
+  }
+
+  function shapePointerEnd(event:PointerEvent<SVGSVGElement>,commit:boolean){
+    const state=shapeStart.current;
+    if(!state||state.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopPropagation();
+    shapeStart.current=undefined;
+    setShapePreview(undefined);
+    if(event.currentTarget.hasPointerCapture(event.pointerId)){
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if(!commit)return;
+    try{
+      const end=getPdfPoint(event.currentTarget,event.clientX,event.clientY);
+      const dx=end.x-state.start.x,dy=end.y-state.start.y;
+      if(Math.hypot(dx,dy)<4)return; // no stray tiny mouse-click objects
+      const x=Math.min(state.start.x,end.x);
+      const y=Math.min(state.start.y,end.y);
+      const width=Math.max(5,Math.abs(dx));
+      const height=Math.max(5,Math.abs(dy));
+      const primitive={
+        id:crypto.randomUUID(),type:state.type,
+        x:state.type==="line"?state.start.x-x:0,
+        y:state.type==="line"?state.start.y-y:0,
+        width:state.type==="line"?dx:width,
+        height:state.type==="line"?dy:height,
+        stroke:"#ce5638",fill:state.type==="line"?"none":"none",
+        lineWidth:1.5
+      } as const;
+      const template:SymbolTemplate={
+        version:1,id:"axik-basic-"+state.type,
+        name:state.type==="rect"?"Rectangle":
+          state.type==="ellipse"?"Ellipse":"Line",
+        primitives:[primitive]
+      };
+      const annotation=makeSymbolAnnotation(
+        template,{x,y},visibleBounds(),crypto.randomUUID()
+      );
+      onAddSymbol({...annotation,pageIndex});
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Could not add shape.");
+    }
+  }
+
   function handlePageClick(event: MouseEvent<SVGSVGElement>) {
-    if (!page || !viewport || (tool !== "callout" && tool !== "text" && tool !== "note")) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const tip = viewportToPdf(viewport.transform, {
-      x: event.clientX - bounds.left, y: event.clientY - bounds.top
-    });
+    if (!page || !viewport || (tool !== "callout" && tool !== "text" &&
+      tool !== "note" && tool !== "symbol") || event.altKey) return;
+    // Reuse the rect-size-aware conversion used by drawing/dragging. A
+    // CSS-scaled page must not shift callout tips or stamped fixtures.
+    const tip = getPdfPoint(event.currentTarget,event.clientX,event.clientY);
     const [left = 0, bottom = 0, right = 612, top = 792] = page.view;
     try {
       const pageBounds={ x: left, y: bottom, width: right - left, height: top - bottom };
@@ -379,10 +462,14 @@ export function PageCanvas({
         onAddText(newTextBox({
           id: crypto.randomUUID(),pageIndex,location:tip,pageBounds
         }));
-      }else{
+      }else if(tool==="note"){
         onAddNote(newStickyNote({
           id:crypto.randomUUID(),pageIndex,position:tip
         }));
+      }else if(tool==="symbol" && symbolTemplate){
+        onAddSymbol({...makeSymbolAnnotation(
+          symbolTemplate,tip,pageBounds,crypto.randomUUID()
+        ),pageIndex});
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cannot place callout.");
@@ -403,9 +490,10 @@ export function PageCanvas({
           height={viewport.height}
           viewBox={"0 0 " + viewport.width + " " + viewport.height}
           onClick={handlePageClick}
-          onPointerMove={pointerMove}
-          onPointerUp={event=>endDrag(event,true)}
-          onPointerCancel={event=>endDrag(event,false)}
+          onPointerDown={shapePointerDown}
+          onPointerMove={event=>{pointerMove(event);shapePointerMove(event);}}
+          onPointerUp={event=>{endDrag(event,true);shapePointerEnd(event,true);}}
+          onPointerCancel={event=>{endDrag(event,false);shapePointerEnd(event,false);}}
           style={{ cursor: tool !== "select" ? "crosshair" : "default" }}
           aria-label="Page annotation overlay"
         >
@@ -415,6 +503,47 @@ export function PageCanvas({
             // PDF.js already paints imported native appearances underneath.
             // Keep the edit handle faint until the document is exported again.
             const imported=Boolean(annotation.sourceName);
+            if(annotation.kind==="symbol"){
+              const selected=selectedAnnotationId===annotation.id;
+              const {box}=annotation;
+              const t=symbolTransform(annotation);
+              const pdf=viewport.transform;
+              const group="matrix("+pdf.join(" ")+") translate("+
+                box.x+" "+box.y+") matrix("+
+                [t.a,t.b,t.c,t.d,t.e,t.f].join(" ")+")";
+              const rect=transformedRect(viewport.transform,box);
+              return <g key={annotation.id}
+                className="annotation-mark"
+                opacity={selected||isDragging?1:imported?.15:1}
+                onClick={event=>{event.stopPropagation();onSelect(annotation.id);}}>
+                <g transform={group} pointerEvents="none">
+                  {annotation.primitives.map(p=>
+                    p.type==="rect"
+                      ?<rect key={p.id} x={p.x} y={p.y} width={p.width}
+                        height={p.height} fill={p.fill} stroke={p.stroke}
+                        strokeWidth={p.lineWidth}/>
+                      :p.type==="ellipse"
+                        ?<ellipse key={p.id} cx={p.x+p.width/2}
+                          cy={p.y+p.height/2} rx={p.width/2} ry={p.height/2}
+                          fill={p.fill} stroke={p.stroke}
+                          strokeWidth={p.lineWidth}/>
+                        :<line key={p.id} x1={p.x} y1={p.y}
+                          x2={p.x+p.width} y2={p.y+p.height}
+                          stroke={p.stroke} strokeWidth={p.lineWidth}/>
+                  )}
+                </g>
+                <rect x={rect.x} y={rect.y} width={rect.width}
+                  height={rect.height} fill="transparent"
+                  stroke={selected?"#2670e8":"transparent"}
+                  strokeWidth={selected?2:0}
+                  strokeDasharray="6 3" role="button" tabIndex={0}
+                  aria-label={"Move symbol on page "+(pageIndex+1)}
+                  className="markup-drag-box"
+                  onPointerDown={event=>beginDrag(event,annotation)}
+                  onKeyDown={event=>keyboardMove(event,annotation)}/>
+                {markupControlHandles(annotation)}
+              </g>;
+            }
             if (annotation.kind === "text") {
               const rect = transformedRect(viewport.transform, annotation.box);
               const selected = selectedAnnotationId === annotation.id;
@@ -483,6 +612,23 @@ export function PageCanvas({
               </g>
             );
           })}
+          {shapePreview && (()=>{
+            const start=pdfToViewport(viewport.transform,shapePreview.start);
+            const end=pdfToViewport(viewport.transform,shapePreview.end);
+            const x=Math.min(start.x,end.x),y=Math.min(start.y,end.y);
+            const w=Math.abs(end.x-start.x),h=Math.abs(end.y-start.y);
+            return shapePreview.type==="line"
+              ?<line className="drawing-preview" x1={start.x} y1={start.y}
+                x2={end.x} y2={end.y} stroke="#ce5638"
+                strokeWidth={1.5}/>
+              :shapePreview.type==="ellipse"
+                ?<ellipse className="drawing-preview"
+                  cx={x+w/2} cy={y+h/2} rx={w/2} ry={h/2}
+                  fill="none" stroke="#ce5638" strokeWidth={1.5}/>
+                :<rect className="drawing-preview" x={x} y={y}
+                  width={w} height={h} fill="none"
+                  stroke="#ce5638" strokeWidth={1.5}/>;
+          })()}
         </svg>
       )}
       {error && <div className="page-render-error" role="alert">{error}</div>}

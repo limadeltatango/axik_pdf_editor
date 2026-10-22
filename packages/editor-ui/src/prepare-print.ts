@@ -9,9 +9,10 @@
  * vector lineweights and exact scale must be preserved.
  */
 import { PDFDocument, degrees } from "pdf-lib";
-import { normalizeForFixedStockPrinting, type NormalizedPrintResult,
-  PrintPreparationError, planPrintableDocument } from "@axik/print-document";
-import { type PrintPlan, type PlanOptions } from "@axik/print-plan";
+import { normalizeForFixedStockPrinting,
+  PrintPreparationError, planPrintableDocument,
+  type PrintJobSettings } from "@axik/print-document";
+import { type PrintPlan } from "@axik/print-plan";
 import { type Annotation } from "@axik/document-core";
 import { exportEditedPdf,planAnnotationEdits } from "@axik/pdf-writer";
 import { startOpenPdf } from "./pdf";
@@ -53,7 +54,7 @@ export interface PreparedPrintDocument {
 export async function preparePrintDocument(
   original:Uint8Array,
   annotations:readonly Annotation[],
-  settings:Omit<PlanOptions,"pages">,
+  settings:PrintJobSettings,
   options:{
     rasterDpi?:number;
     importedAnnotations?:readonly Annotation[];
@@ -87,7 +88,9 @@ export async function preparePrintDocument(
   let loaded;
   try{
     loaded=await source.promise;
-    if(loaded.numPages>MAX_RASTER_PAGES){
+    const selectedCount=plan.sheets.flatMap(s=>s.faces)
+      .filter(face=>Boolean(face.placement)).length;
+    if(selectedCount>MAX_RASTER_PAGES){
       throw new PrintPreparationError(
         "Annotated raster print is limited to 75 pages per batch in this alpha.",
         "UNSUPPORTED_DOCUMENT"
