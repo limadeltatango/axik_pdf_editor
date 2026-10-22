@@ -48,9 +48,15 @@ export function ShapeBuilderPanel({
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const groupRef=useRef<SVGGElement>(null);
+  // Freeze both the SVG viewBox and coordinate transform for a drag gesture.
+  // Recomputing extents while dragging changes getScreenCTM and would cause
+  // pointer displacement to drift or partially cancel near the symbol edge.
+  const [dragFrame,setDragFrame]=useState<{
+    width:number;height:number;originX:number;originY:number
+  } | undefined>(undefined);
   const drag=useRef<{
     pointerId:number;id:string;start:{x:number;y:number};
-    original:SymbolPrimitive
+    inverse:DOMMatrix;original:SymbolPrimitive
   } | undefined>(undefined);
 
   const selected=template.primitives.find(p=>p.id===selectedId);
@@ -58,11 +64,10 @@ export function ShapeBuilderPanel({
   const width=Math.max(180,ext.width+50);
   const height=Math.max(115,ext.height+50);
   const originX=25-ext.x,originY=height-25+ext.y;
+  const preview=dragFrame??{width,height,originX,originY};
 
-  function localPoint(clientX:number,clientY:number){
-    const matrix=groupRef.current?.getScreenCTM();
-    if(!matrix)throw new Error("Symbol preview is not ready for editing.");
-    const p=new DOMPoint(clientX,clientY).matrixTransform(matrix.inverse());
+  function localPoint(clientX:number,clientY:number,inverse:DOMMatrix){
+    const p=new DOMPoint(clientX,clientY).matrixTransform(inverse);
     return {x:p.x,y:p.y};
   }
   function choose(id:string){
@@ -155,14 +160,22 @@ export function ShapeBuilderPanel({
     if(event.button!==0)return;
     event.preventDefault();event.stopPropagation();
     try{
+      const group=groupRef.current;
+      const matrix=group?.getScreenCTM();
+      if(!group||!matrix)throw new Error("Symbol preview is not ready for editing.");
+      const inverse=matrix.inverse();
+      group.setPointerCapture(event.pointerId);
       drag.current={
         pointerId:event.pointerId,id:primitive.id,
-        start:localPoint(event.clientX,event.clientY),
-        original:{...primitive}
+        start:localPoint(event.clientX,event.clientY,inverse),
+        inverse,original:{...primitive}
       };
-      groupRef.current?.setPointerCapture(event.pointerId);
+      setDragFrame({width:preview.width,height:preview.height,
+        originX:preview.originX,originY:preview.originY});
       setSelectedId(primitive.id);
     }catch(reason){
+      drag.current=undefined;
+      setDragFrame(undefined);
       setError(reason instanceof Error?reason.message:"Cannot grab primitive.");
     }
   }
@@ -171,7 +184,7 @@ export function ShapeBuilderPanel({
     if(!state||state.pointerId!==event.pointerId)return;
     event.preventDefault();
     try{
-      const current=localPoint(event.clientX,event.clientY);
+      const current=localPoint(event.clientX,event.clientY,state.inverse);
       const changes={
         x:Math.round((state.original.x+current.x-state.start.x)*10)/10,
         y:Math.round((state.original.y+current.y-state.start.y)*10)/10
@@ -182,6 +195,7 @@ export function ShapeBuilderPanel({
   function onEnd(event:PointerEvent<SVGGElement>){
     if(drag.current?.pointerId!==event.pointerId)return;
     drag.current=undefined;
+    setDragFrame(undefined);
     if(groupRef.current?.hasPointerCapture(event.pointerId)){
       groupRef.current.releasePointerCapture(event.pointerId);
     }
@@ -221,11 +235,11 @@ export function ShapeBuilderPanel({
       <div className="symbol-workbench">
         <div className="symbol-preview">
           <svg role="img" aria-label="Editable compound symbol preview"
-            viewBox={"0 0 "+width+" "+height}
+            viewBox={"0 0 "+preview.width+" "+preview.height}
             preserveAspectRatio="xMidYMid meet">
             <rect width={width} height={height} fill="#f3f6fa"/>
             <g ref={groupRef}
-              transform={"translate("+originX+" "+originY+") scale(1 -1)"}
+              transform={"translate("+preview.originX+" "+preview.originY+") scale(1 -1)"}
               onPointerMove={onMove} onPointerUp={onEnd}
               onPointerCancel={onEnd}>
               {template.primitives.map(p=>{

@@ -264,3 +264,43 @@ test("new rectangle style controls persist line weight and vector fill after exp
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+test("compound component drag uses a fixed preview transform as extents change",async()=>{
+  test.setTimeout(80_000);
+  const dir=await mkdtemp(join(tmpdir(),"axik-component-drag-"));
+  const input=join(dir,"source.pdf");
+  const doc=await PDFDocument.create();
+  doc.addPage([612,792]);
+  await writeFile(input,await doc.save());
+  const {context,page,errors}=await launchEditor(dir);
+  try{
+    await page.locator('input[type="file"]').setInputFiles(input);
+    await expect(page.locator(".pdf-canvas")).toBeVisible({timeout:25_000});
+    await page.getByRole("button",{name:"Symbol Builder…"}).click();
+    const builder=page.getByRole("dialog",{name:"Custom vector symbol builder"});
+    const preview=builder.locator(".symbol-preview svg");
+    const fixture=preview.locator("rect.symbol-part").nth(1);
+    await expect(fixture).toBeVisible();
+    const original=await fixture.boundingBox();
+    expect(original).not.toBeNull();
+    const originalViewBox=await preview.getAttribute("viewBox");
+    const movement=25*original!.width/110; // 25 intrinsic PDF units
+    const x=original!.x+original!.width/2;
+    const y=original!.y+original!.height/2;
+    await page.mouse.move(x,y);
+    await page.mouse.down();
+    await page.mouse.move(x-movement,y,{steps:12});
+    await expect(preview).toHaveAttribute("viewBox",originalViewBox!);
+    await page.mouse.up();
+    await expect.poll(async()=>Number(
+      await builder.getByLabel("Component x").inputValue()
+    )).toBeLessThan(-22);
+    await expect.poll(async()=>Number(
+      await builder.getByLabel("Component x").inputValue()
+    )).toBeGreaterThan(-28);
+    expect(errors).toEqual([]);
+  }finally{
+    await context.close();
+    await rm(dir,{recursive:true,force:true});
+  }
+});
