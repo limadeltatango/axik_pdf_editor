@@ -104,3 +104,22 @@ test("Ctrl+wheel zoom has pointer anchors and bounded multiplier",()=>{
   assert.deepEqual(panScrollPosition({left:10,top:10},{x:50,y:50}),
     {left:0,top:0});
 });
+
+test("basic vector shapes can change stroke width, color and fill without modifying the saved template",()=>{
+  const initial=validateSymbolTemplate({
+    version:1,id:"shape-style",name:"Rectangle",
+    primitives:[{id:"rect-a",type:"rect",x:0,y:0,width:90,height:35,
+      lineWidth:1.5,stroke:"#ce5638",fill:"none"}]
+  });
+  const styled=updateSymbolComponent(initial,"rect-a",{
+    lineWidth:3.5,stroke:"#125eab",fill:"#eef5cb"
+  });
+  assert.equal(initial.primitives[0]?.lineWidth,1.5);
+  assert.equal(initial.primitives[0]?.fill,"none");
+  assert.deepEqual(styled.primitives[0],{
+    ...initial.primitives[0],lineWidth:3.5,
+    stroke:"#125eab",fill:"#eef5cb"
+  });
+  assert.throws(()=>updateSymbolComponent(initial,"rect-a",{lineWidth:0}),RangeError);
+  assert.throws(()=>updateSymbolComponent(initial,"rect-a",{stroke:"blue"}),RangeError);
+});

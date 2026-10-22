@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import {
   applyCommand, hasEdits, initialEditorState, redo, undo,
+  updateSymbolComponent,validateSymbolAnnotation,
   type Annotation, type CalloutAnnotation, type TextBoxAnnotation, type StickyNoteAnnotation,
-  type MovableBox, type SymbolAnnotation,type SymbolTemplate,type EditorState
+  type MovableBox, type SymbolAnnotation,type SymbolTemplate,type SymbolPrimitive,type EditorState
 } from "@axik/document-core";
 import {
   deleteDraft, documentFingerprint, readDraft, writeDraft,
@@ -500,6 +501,30 @@ export function EditorApp({
 
   const selectedAnnotation: Annotation | undefined =
     editor.annotations.find((annotation) => annotation.id === selectedId);
+
+  // Basic vector markup should be as easy to style as a callout: the full
+  // compound builder is needed only when there are multiple primitives.
+  function changeSingleShapeStyle(
+    annotation:SymbolAnnotation,changes:Partial<Omit<SymbolPrimitive,"id">>
+  ){
+    if(annotation.primitives.length!==1)return;
+    try{
+      const existing=annotation.primitives[0]!;
+      const updated=updateSymbolComponent({
+        version:1,id:annotation.templateId,name:annotation.name,
+        primitives:annotation.primitives
+      },existing.id,changes);
+      const revised=validateSymbolAnnotation({
+        ...annotation,primitives:updated.primitives,
+        updatedAt:new Date().toISOString()
+      });
+      setEditor(prev=>applyCommand(prev,{type:"replace",annotation:revised}));
+      setError(undefined);
+    }catch(reason){
+      setError(pdfError(reason));
+    }
+  }
+
   const dirty = hasEdits(editor);
   const documentBusy=loading || importingAnnotations;
 
@@ -965,6 +990,47 @@ export function EditorApp({
                   }}/>
               </label>
             </div>
+            {selectedAnnotation.primitives.length===1 && (()=>{
+              const primitive=selectedAnnotation.primitives[0]!;
+              return <section className="symbol-shape-style"
+                aria-label="Basic vector shape appearance">
+                <strong>Shape appearance</strong>
+                <div className="symbol-instance-fields">
+                  <label>Stroke width (pt)
+                    <input type="number" aria-label="Vector stroke width"
+                      min={0.1} max={40} step={0.5}
+                      value={primitive.lineWidth}
+                      onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                        lineWidth:Number(event.target.value)
+                      })}/>
+                  </label>
+                  <label>Stroke color
+                    <input type="color" aria-label="Vector stroke color"
+                      value={primitive.stroke}
+                      onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                        stroke:event.target.value
+                      })}/>
+                  </label>
+                  {primitive.type!=="line" && <>
+                    <label>Fill color
+                      <input type="color" aria-label="Vector fill color"
+                        disabled={primitive.fill==="none"}
+                        value={primitive.fill==="none"?"#ffffff":primitive.fill}
+                        onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                          fill:event.target.value
+                        })}/>
+                    </label>
+                    <label>No fill
+                      <input type="checkbox" aria-label="Vector no fill"
+                        checked={primitive.fill==="none"}
+                        onChange={event=>changeSingleShapeStyle(selectedAnnotation,{
+                          fill:event.target.checked?"none":"#ffffff"
+                        })}/>
+                    </label>
+                  </>}
+                </div>
+              </section>;
+            })()}
             <button onClick={()=>{
               setEditSymbolInstanceId(selectedAnnotation.id);
               setShowShapeBuilder(true);

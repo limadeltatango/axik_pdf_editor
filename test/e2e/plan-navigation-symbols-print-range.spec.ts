@@ -217,3 +217,50 @@ test("offscreen measured page slots resize at every zoom without adding live can
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+test("new rectangle style controls persist line weight and vector fill after export",async()=>{
+  test.setTimeout(100_000);
+  const dir=await mkdtemp(join(tmpdir(),"axik-basic-shape-style-"));
+  const input=join(dir,"source.pdf"),output=join(dir,"styled.pdf");
+  const doc=await PDFDocument.create();
+  doc.addPage([612,792]);
+  await writeFile(input,await doc.save());
+  const {context,page,errors}=await launchEditor(dir);
+  try{
+    await page.locator('input[type="file"]').setInputFiles(input);
+    const overlay=page.locator("svg.annotation-layer");
+    await expect(overlay).toBeVisible({timeout:25_000});
+    await page.locator(".toolstrip").getByRole("button",{name:"Rectangle"}).click();
+    const rect=await overlay.boundingBox();
+    expect(rect).not.toBeNull();
+    await page.mouse.move(rect!.x+80,rect!.y+170);
+    await page.mouse.down();
+    await page.mouse.move(rect!.x+180,rect!.y+230,{steps:8});
+    await page.mouse.up();
+    const weight=page.getByLabel("Vector stroke width");
+    await expect(weight).toBeVisible({timeout:10_000});
+    await weight.fill("3");
+    await expect(weight).toHaveValue("3");
+    await page.getByLabel("Vector no fill").uncheck();
+    await expect(page.getByLabel("Vector fill color")).toBeEnabled();
+    await expect(page.getByLabel("Vector no fill")).not.toBeChecked();
+
+    const pending=page.waitForEvent("download");
+    await page.getByRole("button",{name:"Quick Export"}).click();
+    await (await pending).saveAs(output);
+    const saved=await PDFDocument.load(new Uint8Array(await readFile(output)));
+    const arr=saved.getPage(0).node.lookup(PDFName.of("Annots"),PDFArray);
+    expect(arr.size()).toBe(1);
+    const dict=saved.context.lookup(arr.get(0),PDFDict);
+    expect(dict.lookup(PDFName.of("Subtype"),PDFName).asString()).toBe("/Stamp");
+    expect(dict.lookup(PDFName.of("AP"),PDFDict).get(PDFName.of("N"))).toBeTruthy();
+    const metadata=JSON.parse(dict.lookup(PDFName.of("AxikSymbol"),PDFHexString).decodeText());
+    expect(metadata.primitives).toHaveLength(1);
+    expect(metadata.primitives[0].lineWidth).toBe(3);
+    expect(metadata.primitives[0].fill).toBe("#ffffff");
+    expect(errors).toEqual([]);
+  }finally{
+    await context.close();
+    await rm(dir,{recursive:true,force:true});
+  }
+});
