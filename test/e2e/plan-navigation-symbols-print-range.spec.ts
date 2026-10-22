@@ -174,3 +174,46 @@ test("custom noncontiguous print selection controls actual print-ready PDF pages
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+test("offscreen measured page slots resize at every zoom without adding live canvases",async()=>{
+  test.setTimeout(100_000);
+  const dir=await mkdtemp(join(tmpdir(),"axik-placeholder-zoom-"));
+  const input=join(dir,"mixed-24-pages.pdf");
+  const doc=await PDFDocument.create();
+  for(let index=0;index<24;index++){
+    doc.addPage(index%2===0?[612,792]:[1224,792]);
+  }
+  await writeFile(input,await doc.save());
+  const {context,page,errors}=await launchEditor(dir);
+  try{
+    await page.locator('input[type="file"]').setInputFiles(input);
+    await expect(page.locator(".pdf-canvas")).toBeVisible({timeout:25_000});
+    await page.getByLabel("Page view").selectOption("continuous");
+    const first=page.locator('.view-page-slot[data-page-number="1"]');
+    await expect(first.locator(".pdf-canvas")).toBeVisible({timeout:20_000});
+    const firstAtUnit=await first.evaluate(el=>el.getBoundingClientRect().height);
+    expect(firstAtUnit).toBeGreaterThan(700);
+    const goto=page.getByLabel("Go to page");
+    await goto.fill("23");
+    await goto.press("Enter");
+    await expect(page.locator('[data-view-row="0"]')).toHaveAttribute(
+      "data-rendered","false",{timeout:20_000});
+    await expect(first.locator(".view-page-skeleton")).toBeVisible({timeout:20_000});
+    const cached=await first.evaluate(el=>el.getBoundingClientRect().height);
+    expect(Math.abs(cached-firstAtUnit)).toBeLessThan(2);
+    await page.getByRole("button",{name:"Zoom in"}).click();
+    await expect.poll(()=>first.evaluate(el=>el.getBoundingClientRect().height))
+      .toBeGreaterThan(cached*1.17);
+    const zoomed=await first.evaluate(el=>el.getBoundingClientRect().height);
+    await page.getByRole("button",{name:"Zoom out"}).click();
+    await expect.poll(async()=>Math.abs(
+      (await first.evaluate(el=>el.getBoundingClientRect().height))-cached
+    )).toBeLessThan(2);
+    expect(zoomed).toBeGreaterThan(cached);
+    await expect.poll(()=>page.locator(".pdf-canvas").count()).toBeLessThan(11);
+    expect(errors).toEqual([]);
+  }finally{
+    await context.close();
+    await rm(dir,{recursive:true,force:true});
+  }
+});

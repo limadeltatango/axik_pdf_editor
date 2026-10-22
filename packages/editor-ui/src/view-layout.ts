@@ -100,4 +100,19 @@ export function normalizedViewPreferences(value:unknown):ViewPreferences{
   };
 }
 
+/**
+ * Preserve measured PDF geometry at unit zoom so virtualized/off-screen page
+ * placeholders remain in sync whenever the person zooms the drawing.
+ * This also avoids rounding and cumulative scale drift across zoom changes.
+ */
+export function scaledPageSize(
+  native:{width:number;height:number},zoom:number
+):{width:number;height:number}{
+  if(![native.width,native.height,zoom].every(Number.isFinite) ||
+     native.width<=0 || native.height<=0 || zoom<=0){
+    throw new RangeError("Invalid intrinsic PDF page dimensions or zoom.");
+  }
+  return {width:native.width*zoom,height:native.height*zoom};
+}
+
 export const MAX_ACTIVE_VIEW_PAGES = 10;

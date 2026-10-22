@@ -10,7 +10,7 @@ import type {PdfDocument,PdfPage} from "./pdf";
 import {PageCanvas} from "./PageCanvas";
 import {
   MAX_ACTIVE_VIEW_PAGES,groupVisiblePages,isContinuous,isTwoUp,
-  spreadForPage,type ViewMode
+  scaledPageSize,spreadForPage,type ViewMode
 } from "./view-layout";
 import {
   anchoredScrollDelta,nextPointerZoom,panScrollPosition,
@@ -60,8 +60,14 @@ function PageSlot({
   pdf,pageNumber,enabled,zoom,fallbackSize,...events
 }:SlotProps){
   const [page,setPage]=useState<PdfPage>();
+  // Remember intrinsic PDF page size, NOT a size measured at one zoom level.
+  // Off-screen slots retain this size so placeholders scale with future zooms.
   const [dimensions,setDimensions]=useState<{width:number;height:number}>();
   const [error,setError]=useState<string>();
+  useEffect(()=>{
+    setPage(undefined);
+    setDimensions(undefined);
+  },[pdf,pageNumber]);
   useEffect(()=>{
     if(!enabled){setPage(undefined);return;}
     let active=true;
@@ -71,7 +77,7 @@ function PageSlot({
     });
     pdf.getPage(pageNumber).then(next=>{
       if(!active)return;
-      const v=next.getViewport({scale:zoom});
+      const v=next.getViewport({scale:1});
       setDimensions({width:v.width,height:v.height});
       setPage(next);
       setError(undefined);
@@ -88,14 +94,9 @@ function PageSlot({
     return ()=>{active=false};
   },[pdf,pageNumber,enabled]);
 
-  useEffect(()=>{
-    if(page){
-      const view=page.getViewport({scale:zoom});
-      setDimensions({width:view.width,height:view.height});
-    }
-  },[page,zoom]);
-
-  const size=dimensions??fallbackSize;
+  // This is valid for active canvases and dormant placeholders alike.
+  // Never use a stale CSS pixel size cached from an earlier zoom.
+  const size=dimensions?scaledPageSize(dimensions,zoom):fallbackSize;
   return <div className="view-page-slot"
     data-page-number={pageNumber}
     style={{minWidth:Math.max(100,size.width),minHeight:Math.max(100,size.height)}}>
@@ -128,7 +129,6 @@ export function DocumentViewport(props:DocumentViewportProps){
   }=props;
   const rootRef=useRef<HTMLDivElement>(null);
   const scrollFrame=useRef<number | undefined>(undefined);
-  const previousZoom=useRef(zoom);
   const currentZoom=useRef(zoom);
   currentZoom.current=zoom;
   const zoomPending=useRef<CursorAnchor | undefined>(undefined);
@@ -151,27 +151,21 @@ export function DocumentViewport(props:DocumentViewportProps){
   },[groups,pageNumber]);
 
   const [focusGroup,setFocusGroup]=useState(firstGroupIndex);
-  const [referenceSize,setReferenceSize]=useState({width:612*zoom,height:792*zoom});
+  const [referenceSize,setReferenceSize]=useState({width:612,height:792});
 
   useEffect(()=>{
     let active=true;
     pdf.getPage(1).then(page=>{
       if(!active)return;
-      const v=page.getViewport({scale:zoom});
+      const v=page.getViewport({scale:1});
       setReferenceSize({width:v.width,height:v.height});
     }).catch(()=>undefined);
     return ()=>{active=false};
   },[pdf]);
 
-  useEffect(()=>{
-    const factor=zoom/Math.max(.01,previousZoom.current);
-    previousZoom.current=zoom;
-    if(Math.abs(factor-1)>0.0001){
-      setReferenceSize(size=>({
-        width:size.width*factor,height:size.height*factor
-      }));
-    }
-  },[zoom]);
+  // A fresh scale is derived per render; late PDF metadata cannot reset an
+  // already zoomed document's placeholder dimensions to the initial zoom.
+  const fallbackSize=scaledPageSize(referenceSize,zoom);
 
   useEffect(()=>{
     const root=rootRef.current;
@@ -396,7 +390,7 @@ export function DocumentViewport(props:DocumentViewportProps){
             pdf={pdf} pageNumber={number} enabled={rendered}
             zoom={zoom} tool={events.tool}
             symbolTemplate={events.symbolTemplate}
-            fallbackSize={referenceSize}
+            fallbackSize={fallbackSize}
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
             onSelect={events.onSelect}
